@@ -229,6 +229,21 @@ app.post('/api/auth/verify-otp', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/auth/check-user — check if email exists (public)
+// ═══════════════════════════════════════════════════════════
+app.post('/api/auth/check-user', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email required' });
+    const { data } = await supabase.from('users').select('id').eq('email', email.trim().toLowerCase()).single();
+    res.json({ success: true, exists: !!data });
+  } catch {
+    // If no row found, supabase throws — treat as "does not exist"
+    res.json({ success: true, exists: false });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/auth/me — validate token & return user
 // ═══════════════════════════════════════════════════════════
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
@@ -545,8 +560,11 @@ app.listen(PORT, async () => {
   try {
     const { error: uErr } = await supabase.from('users').select('id').limit(1);
     console.log(uErr ? `❌ users table: ${uErr.message}` : '✅ users table OK');
-    const { error: aErr } = await supabase.from('appointments').select('id').limit(1);
-    console.log(aErr ? `❌ appointments table: ${aErr.message}` : '✅ appointments table OK');
+    const { error: aErr } = await supabase.from('appointments').select('id, name, email, phone').limit(1);
+    console.log(aErr ? `❌ appointments table: ${aErr.message}` : '✅ appointments table OK (name, email, phone columns verified)');
+    if (aErr && aErr.message.includes('schema cache')) {
+      console.log('⚠️  Schema cache issue detected. Run: NOTIFY pgrst, \'reload schema\'; in Supabase SQL Editor');
+    }
   } catch (e) {
     console.error('❌ DB check failed:', e.message);
   }

@@ -365,7 +365,7 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-semibold text-gray-900 truncate">
                                     {apt.name}
                                   </p>
-                                  <div className="flex items-center gap-3 mt-0.5">
+                                  <div className="flex flex-col gap-0.5 mt-0.5">
                                     {apt.email && (
                                       <span className="text-xs text-gray-400 flex items-center gap-1 truncate">
                                         <Mail className="w-3 h-3 shrink-0" />
