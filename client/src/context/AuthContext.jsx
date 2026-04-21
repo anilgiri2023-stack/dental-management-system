@@ -71,10 +71,10 @@ export function AuthProvider({ children }) {
   };
 
   // Verify OTP and login — returns user with role
-  const verifyOtp = async (identifier, type, otp, name) => {
+  const verifyOtp = async (identifier, type, otp, name, phone) => {
     const data = await apiFetch('/auth/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ identifier, type, otp, name }),
+      body: JSON.stringify({ identifier, type, otp, name, phone }),
     });
 
     // Save session — user object includes id, email, role

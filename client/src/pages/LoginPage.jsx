@@ -22,6 +22,7 @@ export default function LoginPage() {
 
   const [identifier, setIdentifier] = useState('');
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''));
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -89,7 +90,7 @@ export default function LoginPage() {
     }
 
     try {
-      const result = await verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined);
+      const result = await verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined, phone.trim() || undefined);
       setSuccess('Verification successful! Redirecting...');
       const dest = result.user?.role === 'admin' ? '/admin/dashboard' : '/dashboard';
       setTimeout(() => navigate(dest), 800);
@@ -122,7 +123,7 @@ export default function LoginPage() {
         const otpString = newOtp.join('');
         setLoading(true);
         setError('');
-        verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined)
+        verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined, phone.trim() || undefined)
           .then((result) => {
             setSuccess('Verification successful! Redirecting...');
             const dest = result.user?.role === 'admin' ? '/admin/dashboard' : '/dashboard';
@@ -247,6 +248,25 @@ export default function LoginPage() {
                       placeholder="you@example.com"
                       required
                       autoFocus
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300"
+                    />
+                  </div>
+                  
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                      <Phone className="w-3 h-3" />
+                      Mobile Number
+                    </label>
+                    <input
+                      type="tel"
+                      id="auth-phone"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="10-digit mobile number"
+                      pattern="[0-9]{10}"
+                      maxLength="10"
+                      required
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300"
                     />
                   </div>

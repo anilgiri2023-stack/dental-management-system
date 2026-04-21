@@ -142,7 +142,7 @@ app.post('/api/auth/send-otp', (req, res) => {
 // ═══════════════════════════════════════════════════════════
 app.post('/verify-otp', async (req, res) => {
   try {
-    const { email, otp, name } = req.body;
+    const { email, otp, name, phone } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
     const stored = otpStore.get(email);
@@ -165,22 +165,35 @@ app.post('/verify-otp', async (req, res) => {
     if (existingUser) {
       user = existingUser;
       console.log(`✅ Existing user: ${user.id}`);
-      // Update name if provided and different
-      if (name && user.name !== name) {
-        const { data: updatedUser } = await supabase.from('users').update({ name }).eq('id', user.id).select().single();
+      // Update name/phone if provided and different
+      let updates = {};
+      if (name && user.name !== name) updates.name = name;
+      if (phone && user.phone !== phone) updates.phone = phone;
+
+      if (Object.keys(updates).length > 0) {
+        const { data: updatedUser } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
         if (updatedUser) user = updatedUser;
       }
     } else {
+      // Validate required fields for new user
+      if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Name is required' });
+      if (!phone || !phone.trim()) return res.status(400).json({ success: false, message: 'Phone is required' });
+
       // Create new user
       const { data: newUser, error: createErr } = await supabase
         .from('users')
-        .insert([{ email, role: 'user', name: name || 'Patient' }])
+        .insert([{ 
+           email, 
+           name: name.trim(), 
+           phone: phone.trim(),
+           role: 'user' 
+        }])
         .select()
         .single();
 
       if (createErr) {
         console.error('Create user error:', createErr);
-        return res.status(500).json({ success: false, message: 'Failed to create user' });
+        return res.status(400).json({ success: false, message: createErr.message || 'Failed to create user' });
       }
       user = newUser;
       console.log(`✅ New user created: ${user.id}`);
@@ -191,6 +204,7 @@ app.post('/verify-otp', async (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.phone,
       role: user.role || 'user',
     });
 
@@ -198,7 +212,7 @@ app.post('/verify-otp', async (req, res) => {
       success: true,
       message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role || 'user' },
+      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: user.role || 'user' },
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
@@ -224,7 +238,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     }
     const { data } = await supabase.from('users').select('*').eq('id', req.user.id).single();
     if (data) {
-      return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, role: data.role } });
+      return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, phone: data.phone, role: data.role } });
     }
     res.json({ success: true, user: req.user });
   } catch {
