@@ -279,19 +279,24 @@ app.post('/api/admin/login', (req, res) => {
 // ═══════════════════════════════════════════════════════════
 async function bookAppointment(req, res) {
   try {
-    const { date, time, service, phone } = req.body;
+    const { date, time, service, phone, name, email } = req.body;
 
-    if (!date || !time || !service || !phone) {
-      return res.status(400).json({ success: false, message: 'date, time, service, and phone are required' });
+    // Add console logs to confirm values before inserting into database
+    console.log('--- Incoming Booking Request ---');
+    console.log('Name:', name);
+    console.log('Email:', email);
+    console.log('Phone:', phone);
+    console.log('Service:', service);
+    console.log('Date:', date);
+    console.log('Time:', time);
+    console.log('--------------------------------');
+
+    if (!date || !time || !service || !name || !email || !phone) {
+      return res.status(400).json({ success: false, message: 'date, time, service, name, email, and phone are required' });
     }
 
     const userId = req.user.id; // From JWT — never from body
     
-    // Fetch user from DB to ensure we have name and email
-    const { data: currentUser } = await supabase.from('users').select('*').eq('id', userId).single();
-    const userName = currentUser?.name || req.user.name || 'Patient';
-    const userEmail = currentUser?.email || req.user.email || '';
-
     const { data, error } = await supabase
       .from('appointments')
       .insert([{
@@ -300,8 +305,8 @@ async function bookAppointment(req, res) {
         time,
         service,
         phone,
-        name: userName,
-        email: userEmail,
+        name,
+        email,
         status: 'Pending',
       }])
       .select()

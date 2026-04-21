@@ -13,6 +13,7 @@ import {
   User,
   Loader2,
 } from 'lucide-react';
+import supabase from '../utils/supabase';
 
 const TIME_SLOTS = [
   '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM',
@@ -87,9 +88,38 @@ export default function BookingPage() {
 
     setLoading(true);
     try {
+      // 1. Fetch user details from Supabase users table using logged-in user's ID
+      const { data: dbUser, error: dbErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (dbErr) {
+        console.warn('Could not fetch user details from Supabase:', dbErr);
+      }
+
+      // 2. Ensure we have the required details (falling back to context/form if necessary)
+      const bookingName = dbUser?.name || user?.name || 'Patient';
+      const bookingEmail = dbUser?.email || user?.email || '';
+      const bookingPhone = formData.phone || dbUser?.phone || user?.phone || '';
+
+      // 3. Modify the booking API request to include exactly these fields
+      const payload = {
+        name: bookingName,
+        email: bookingEmail,
+        phone: bookingPhone,
+        service: formData.service,
+        date: formData.date,
+        time: formData.time,
+        notes: formData.notes
+      };
+
+      console.log('Confirmed Booking Details BEFORE sending:', payload);
+
       await authFetch('/appointments', {
         method: 'POST',
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
       setSubmitted(true);
     } catch (err) {
