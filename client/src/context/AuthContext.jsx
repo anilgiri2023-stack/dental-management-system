@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../utils/api';
 
-const API_BASE = 'http://localhost:5000/api';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -30,21 +30,8 @@ export function AuthProvider({ children }) {
 
   // Helper — make authenticated request
   const authFetch = useCallback(async (url, options = {}) => {
-    const currentToken = token || localStorage.getItem('cs_token');
-    const headers = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-    if (currentToken) {
-      headers['Authorization'] = `Bearer ${currentToken}`;
-    }
-    const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || 'Request failed');
-    }
-    return data;
-  }, [token]);
+    return apiFetch(url, options);
+  }, []);
 
   // Validate token on mount
   useEffect(() => {
@@ -57,20 +44,9 @@ export function AuthProvider({ children }) {
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/auth/me`, {
-          headers: { 'Authorization': `Bearer ${savedToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data.user);
-          setToken(savedToken);
-        } else {
-          // Token invalid — clear everything
-          localStorage.removeItem('cs_token');
-          localStorage.removeItem('cs_user');
-          setToken(null);
-          setUser(null);
-        }
+        const data = await apiFetch('/auth/me');
+        setUser(data.user);
+        setToken(savedToken);
       } catch (err) {
         console.error('Session validation error:', err);
         localStorage.removeItem('cs_token');
@@ -88,29 +64,18 @@ export function AuthProvider({ children }) {
 
   // Send OTP to email or phone
   const sendOtp = async (identifier, type) => {
-    const res = await fetch(`${API_BASE}/auth/send-otp`, {
+    return apiFetch('/auth/send-otp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier, type }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || 'Failed to send OTP');
-    }
-    return data;
   };
 
   // Verify OTP and login — returns user with role
   const verifyOtp = async (identifier, type, otp, name) => {
-    const res = await fetch(`${API_BASE}/auth/verify-otp`, {
+    const data = await apiFetch('/auth/verify-otp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier, type, otp, name }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || 'Verification failed');
-    }
 
     // Save session — user object includes id, email, role
     localStorage.setItem('cs_token', data.token);
@@ -122,15 +87,10 @@ export function AuthProvider({ children }) {
 
   // ─── Admin Auth ───
   const adminLogin = async (email, password) => {
-    const res = await fetch(`${API_BASE}/admin/login`, {
+    const data = await apiFetch('/admin/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || 'Admin login failed');
-    }
 
     localStorage.setItem('cs_token', data.token);
     localStorage.setItem('cs_user', JSON.stringify(data.user));

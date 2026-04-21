@@ -7,7 +7,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5000'
+      '/api': {
+        target: 'https://dental-management-system-gd47.onrender.com',
+        changeOrigin: true,
+      }
     }
   }
 })
