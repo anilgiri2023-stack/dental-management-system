@@ -17,9 +17,7 @@ const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60; // seconds
 
 export default function LoginPage() {
-  // Auth mode: 'email' or 'phone'
-  const [authMode, setAuthMode] = useState('email');
-  // Steps: 'identifier' → 'otp'
+  // Step: 'identifier' → 'otp'
   const [step, setStep] = useState('identifier');
 
   const [identifier, setIdentifier] = useState('');
@@ -58,18 +56,14 @@ export default function LoginPage() {
 
     try {
       if (!identifier.trim()) {
-        throw new Error(authMode === 'email' ? 'Please enter your email' : 'Please enter your phone number');
+        throw new Error('Please enter your email');
       }
 
-      await sendOtp(identifier.trim(), authMode);
+      await sendOtp(identifier.trim(), 'email');
       setStep('otp');
       setOtp(Array(OTP_LENGTH).fill(''));
       setResendTimer(RESEND_COOLDOWN);
-      setSuccess(
-        authMode === 'email'
-          ? `Verification code sent to ${identifier}`
-          : `Verification code sent to ${identifier.slice(0, -4)}****`
-      );
+      setSuccess(`Verification code sent to ${identifier}`);
 
       // Focus first OTP input after transition
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
@@ -95,7 +89,7 @@ export default function LoginPage() {
     }
 
     try {
-      const result = await verifyOtp(identifier.trim(), authMode, otpString, name.trim() || undefined);
+      const result = await verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined);
       setSuccess('Verification successful! Redirecting...');
       const dest = result.user?.role === 'admin' ? '/admin/dashboard' : '/dashboard';
       setTimeout(() => navigate(dest), 800);
@@ -128,7 +122,7 @@ export default function LoginPage() {
         const otpString = newOtp.join('');
         setLoading(true);
         setError('');
-        verifyOtp(identifier.trim(), authMode, otpString, name.trim() || undefined)
+        verifyOtp(identifier.trim(), 'email', otpString, name.trim() || undefined)
           .then((result) => {
             setSuccess('Verification successful! Redirecting...');
             const dest = result.user?.role === 'admin' ? '/admin/dashboard' : '/dashboard';
@@ -170,7 +164,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await sendOtp(identifier.trim(), authMode);
+      await sendOtp(identifier.trim(), 'email');
       setResendTimer(RESEND_COOLDOWN);
       setOtp(Array(OTP_LENGTH).fill(''));
       setSuccess('New verification code sent!');
@@ -216,34 +210,6 @@ export default function LoginPage() {
                   </p>
                 </div>
 
-                {/* Mode Toggle */}
-                <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
-                  <button
-                    type="button"
-                    onClick={() => { setAuthMode('email'); setIdentifier(''); setError(''); }}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                      authMode === 'email'
-                        ? 'bg-white text-primary shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <Mail className="w-4 h-4" />
-                    Email
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setAuthMode('phone'); setIdentifier(''); setError(''); }}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                      authMode === 'phone'
-                        ? 'bg-white text-primary shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <Phone className="w-4 h-4" />
-                    Phone
-                  </button>
-                </div>
-
                 {/* Error */}
                 {error && (
                   <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">
@@ -252,10 +218,10 @@ export default function LoginPage() {
                 )}
 
                 <form onSubmit={handleSendOtp} className="space-y-5">
-                  {/* Name (optional, for new users) */}
+                  {/* Name (mandatory) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">
-                      Your Name <span className="text-gray-400 normal-case">(optional)</span>
+                      Your Full Name
                     </label>
                     <input
                       type="text"
@@ -263,28 +229,26 @@ export default function LoginPage() {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="John Doe"
+                      required
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300"
                     />
                   </div>
 
-                  {/* Email or Phone */}
+                  {/* Email */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">
-                      {authMode === 'email' ? 'Email Address' : 'Phone Number'}
+                      Email Address
                     </label>
                     <input
-                      type={authMode === 'email' ? 'email' : 'tel'}
+                      type="email"
                       id="auth-identifier"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder={authMode === 'email' ? 'you@example.com' : '+91 98765 43210'}
+                      placeholder="you@example.com"
                       required
                       autoFocus
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300"
                     />
-                    {authMode === 'phone' && (
-                      <p className="text-xs text-gray-400 mt-1.5">Include country code (e.g. +91 for India)</p>
-                    )}
                   </div>
 
                   <button
@@ -326,7 +290,7 @@ export default function LoginPage() {
                   <p className="text-gray-500 text-sm">
                     We sent a 6-digit code to{' '}
                     <span className="font-semibold text-gray-700">
-                      {authMode === 'email' ? identifier : `${identifier.slice(0, -4)}****`}
+                      {identifier}
                     </span>
                   </p>
                 </div>
@@ -442,7 +406,7 @@ export default function LoginPage() {
               Passwordless.<br />Secure. Simple.
             </h2>
             <p className="text-white/80 text-sm leading-relaxed max-w-sm mb-6">
-              No passwords to remember. Just enter your email or phone, verify with a one-time code, and you're in.
+              No passwords to remember. Just enter your email, verify with a one-time code, and you're in.
             </p>
             <div className="flex flex-col gap-3">
               {['No passwords required', 'Instant OTP verification', 'Book appointments in seconds'].map((item) => (

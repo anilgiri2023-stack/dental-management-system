@@ -372,7 +372,12 @@ export default function AdminDashboard() {
                                         {apt.email}
                                       </span>
                                     )}
-
+                                    {apt.phone && (
+                                      <span className="text-xs text-gray-400 flex items-center gap-1 truncate">
+                                        <Phone className="w-3 h-3 shrink-0" />
+                                        {apt.phone}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>

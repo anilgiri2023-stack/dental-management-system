@@ -142,7 +142,7 @@ app.post('/api/auth/send-otp', (req, res) => {
 // ═══════════════════════════════════════════════════════════
 app.post('/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { email, otp, name } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
     const stored = otpStore.get(email);
@@ -165,11 +165,16 @@ app.post('/verify-otp', async (req, res) => {
     if (existingUser) {
       user = existingUser;
       console.log(`✅ Existing user: ${user.id}`);
+      // Update name if provided and different
+      if (name && user.name !== name) {
+        const { data: updatedUser } = await supabase.from('users').update({ name }).eq('id', user.id).select().single();
+        if (updatedUser) user = updatedUser;
+      }
     } else {
       // Create new user
       const { data: newUser, error: createErr } = await supabase
         .from('users')
-        .insert([{ email, role: 'user' }])
+        .insert([{ email, role: 'user', name: name || 'Patient' }])
         .select()
         .single();
 
@@ -185,6 +190,7 @@ app.post('/verify-otp', async (req, res) => {
     const token = signToken({
       id: user.id,
       email: user.email,
+      name: user.name,
       role: user.role || 'user',
     });
 
@@ -192,7 +198,7 @@ app.post('/verify-otp', async (req, res) => {
       success: true,
       message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email, role: user.role || 'user' },
+      user: { id: user.id, email: user.email, name: user.name, role: user.role || 'user' },
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
@@ -218,7 +224,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     }
     const { data } = await supabase.from('users').select('*').eq('id', req.user.id).single();
     if (data) {
-      return res.json({ success: true, user: { id: data.id, email: data.email, role: data.role } });
+      return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, role: data.role } });
     }
     res.json({ success: true, user: req.user });
   } catch {
@@ -259,13 +265,18 @@ app.post('/api/admin/login', (req, res) => {
 // ═══════════════════════════════════════════════════════════
 async function bookAppointment(req, res) {
   try {
-    const { date, time, service } = req.body;
+    const { date, time, service, phone } = req.body;
 
-    if (!date || !time || !service) {
-      return res.status(400).json({ success: false, message: 'date, time, and service are required' });
+    if (!date || !time || !service || !phone) {
+      return res.status(400).json({ success: false, message: 'date, time, service, and phone are required' });
     }
 
     const userId = req.user.id; // From JWT — never from body
+    
+    // Fetch user from DB to ensure we have name and email
+    const { data: currentUser } = await supabase.from('users').select('*').eq('id', userId).single();
+    const userName = currentUser?.name || req.user.name || 'Patient';
+    const userEmail = currentUser?.email || req.user.email || '';
 
     const { data, error } = await supabase
       .from('appointments')
@@ -274,6 +285,9 @@ async function bookAppointment(req, res) {
         date,
         time,
         service,
+        phone,
+        name: userName,
+        email: userEmail,
         status: 'Pending',
       }])
       .select()
@@ -328,9 +342,9 @@ async function getMyAppointments(req, res) {
 
       enriched = enriched.map(apt => ({
         ...apt,
-        // Add user email/name for admin display
-        name: userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
-        email: userMap[apt.user_id]?.email || '',
+        // Use apt.name from appointments table, fallback to user map, then 'Patient'
+        name: apt.name || userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
+        email: apt.email || userMap[apt.user_id]?.email || '',
       }));
     }
 
@@ -367,8 +381,8 @@ app.get('/all-appointments', authMiddleware, adminOnly, async (req, res) => {
 
       enriched = enriched.map(apt => ({
         ...apt,
-        name: userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
-        email: userMap[apt.user_id]?.email || '',
+        name: apt.name || userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
+        email: apt.email || userMap[apt.user_id]?.email || '',
       }));
     }
 

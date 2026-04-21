@@ -39,7 +39,7 @@ export default function BookingPage() {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
-    name: user?.name || '',
+    phone: '',
     date: '',
     time: '',
     service: '',
@@ -68,8 +68,8 @@ export default function BookingPage() {
     e.preventDefault();
     setError('');
 
-    if (!formData.name.trim()) {
-      setError('Please enter your name');
+    if (!formData.phone.trim() || !/^\d{10}$/.test(formData.phone.trim())) {
+      setError('Please enter a valid 10-digit mobile number');
       return;
     }
     if (!formData.date) {
@@ -116,7 +116,11 @@ export default function BookingPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Patient</span>
-                <span className="font-semibold text-gray-700">{formData.name}</span>
+                <span className="font-semibold text-gray-700">{user?.name || 'Patient'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Mobile</span>
+                <span className="font-semibold text-gray-700">{formData.phone}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Service</span>
@@ -153,7 +157,7 @@ export default function BookingPage() {
             <button
               onClick={() => {
                 setSubmitted(false);
-                setFormData({ name: user?.name || '', date: '', time: '', service: '', notes: '' });
+                setFormData({ phone: '', date: '', time: '', service: '', notes: '' });
               }}
               className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all"
             >
@@ -207,22 +211,24 @@ export default function BookingPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Patient Name */}
+          {/* Patient Contact Info */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
               <User className="w-4 h-4 text-primary" />
-              Patient Information
+              Patient Contact Info
             </h2>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">
-                Full Name
+                Mobile Number
               </label>
               <input
-                type="text"
-                name="name"
-                value={formData.name}
+                type="tel"
+                name="phone"
+                value={formData.phone}
                 onChange={handleChange}
-                placeholder="John Doe"
+                placeholder="10-digit mobile number"
+               pattern="[0-9]{10}"
+               maxLength="10"
                 required
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300"
               />
