@@ -41,6 +41,7 @@ CREATE TABLE public.users (
     email TEXT UNIQUE,
     phone TEXT UNIQUE,
     name TEXT,
+    password TEXT,
     role TEXT DEFAULT 'user' NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -66,6 +67,7 @@ WITH CHECK (true);
 CREATE TABLE public.appointments (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+    doctor_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     email TEXT DEFAULT '',
     phone TEXT DEFAULT '',

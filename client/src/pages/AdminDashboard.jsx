@@ -21,6 +21,8 @@ import {
   Users,
   FileText,
   Loader2,
+  Search,
+  X,
 } from 'lucide-react';
 
 const STATUS_CONFIG = {
@@ -61,9 +63,18 @@ export default function AdminDashboard() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('patient'); // 'patient' or 'doctor'
   const [updatingId, setUpdatingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+  
+  // Invite Doctor State
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   const { adminLogout, authFetch } = useAuth();
   const navigate = useNavigate();
@@ -106,10 +117,59 @@ export default function AdminDashboard() {
     }
   }, [activeTab]);
 
-  // Filter appointments
-  const filteredAppointments = filterStatus === 'All'
-    ? appointments
-    : appointments.filter(a => a.status === filterStatus);
+  // Filter appointments by status, search query, and date
+  const filteredAppointments = appointments.filter((a) => {
+    // Status filter
+    if (filterStatus !== 'All' && a.status !== filterStatus) return false;
+
+    // Search filter (name or email)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const nameMatch = a.name?.toLowerCase().includes(q);
+      const emailMatch = a.email?.toLowerCase().includes(q);
+      if (!nameMatch && !emailMatch) return false;
+    }
+
+    // Date filter
+    if (filterDate) {
+      const aptDate = new Date(a.date).toISOString().split('T')[0];
+      if (aptDate !== filterDate) return false;
+    }
+
+    return true;
+  });
+
+  const hasActiveFilters = searchQuery.trim() || filterDate || filterStatus !== 'All';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterDate('');
+    setFilterStatus('All');
+  };
+
+  // Invite Doctor Function (Implements the doctor invite system)
+  const handleInviteDoctor = async (e) => {
+    e.preventDefault();
+    setInviting(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      await authFetch('/admin/invite-doctor', {
+        method: 'POST',
+        body: JSON.stringify({ name: inviteName, email: inviteEmail }),
+      });
+      setSuccessMsg(`Invitation sent to ${inviteEmail}`);
+      setShowInviteModal(false);
+      setInviteName('');
+      setInviteEmail('');
+      if (activeTab === 'users') fetchUsers();
+    } catch (err) {
+      console.error('Invite doctor error:', err);
+      setError(err.message || 'Failed to invite doctor');
+    } finally {
+      setInviting(false);
+    }
+  };
 
   // Update appointment status (triggers email notification on server)
   const handleStatusChange = async (id, newStatus) => {
@@ -249,22 +309,66 @@ export default function AdminDashboard() {
             </div>
 
             {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <Stethoscope className="w-5 h-5 text-primary" />
                 All Appointments
+                <span className="text-sm font-normal text-gray-400">({filteredAppointments.length})</span>
               </h2>
-              <div className="flex items-center gap-3">
-                {/* Filter */}
+              <button
+                onClick={fetchAppointments}
+                id="refresh-appointments"
+                className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 mb-6">
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+                {/* Search Input */}
+                <div className="relative flex-1 min-w-0">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="search-appointments"
+                    type="text"
+                    placeholder="Search by name or email"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Date Picker */}
                 <div className="relative">
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Filter className="w-4 h-4" />
-                  </div>
+                  <Calendar className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none z-10" />
+                  <input
+                    id="date-filter"
+                    type="date"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all cursor-pointer min-w-[180px]"
+                  />
+                </div>
+
+                {/* Status Dropdown */}
+                <div className="relative">
+                  <Filter className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <select
                     id="status-filter"
                     value={filterStatus}
                     onChange={(e) => setFilterStatus(e.target.value)}
-                    className="appearance-none bg-white border border-gray-200 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
+                    className="appearance-none bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white cursor-pointer transition-all min-w-[150px]"
                   >
                     <option value="All">All Status</option>
                     <option value="Pending">Pending</option>
@@ -274,15 +378,17 @@ export default function AdminDashboard() {
                   <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
 
-                {/* Refresh */}
-                <button
-                  onClick={fetchAppointments}
-                  id="refresh-appointments"
-                  className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
+                {/* Clear Filters */}
+                {hasActiveFilters && (
+                  <button
+                    onClick={clearAllFilters}
+                    id="clear-filters"
+                    className="inline-flex items-center justify-center gap-1.5 text-sm font-medium text-primary hover:text-primary-dark bg-primary-50 hover:bg-primary-100 px-4 py-2.5 rounded-xl transition-all shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                    Clear
+                  </button>
+                )}
               </div>
             </div>
 
@@ -315,12 +421,20 @@ export default function AdminDashboard() {
                 <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Calendar className="w-8 h-8 text-gray-400" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">No Appointments</h3>
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">No Appointments Found</h3>
                 <p className="text-sm text-gray-500">
-                  {filterStatus !== 'All'
-                    ? `No ${filterStatus.toLowerCase()} appointments found.`
+                  {hasActiveFilters
+                    ? 'No appointments match your current filters.'
                     : 'No appointments have been booked yet.'}
                 </p>
+                {hasActiveFilters && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="mt-4 text-sm font-medium text-primary hover:text-primary-dark underline underline-offset-2 transition-colors"
+                  >
+                    Clear all filters
+                  </button>
+                )}
               </div>
             ) : (
               /* Appointments Table */
@@ -482,13 +596,44 @@ export default function AdminDashboard() {
                 All Users
                 <span className="text-sm font-normal text-gray-400">({users.length})</span>
               </h2>
-              <button
-                onClick={fetchUsers}
-                className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="inline-flex items-center gap-2 bg-primary text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-primary-dark transition-colors"
+                >
+                  <Mail className="w-4 h-4" />
+                  Invite Doctor
+                </button>
+                <div className="flex bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setUserRoleFilter('patient')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      userRoleFilter === 'patient'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Patients
+                  </button>
+                  <button
+                    onClick={() => setUserRoleFilter('doctor')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      userRoleFilter === 'doctor'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Doctors
+                  </button>
+                </div>
+                <button
+                  onClick={fetchUsers}
+                  className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {/* Error */}
@@ -533,15 +678,17 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {users.map((u) => (
+                      {users
+                        .filter(u => userRoleFilter === 'doctor' ? u.role === 'doctor' : (u.role === 'user' || u.role === 'patient'))
+                        .map((u) => (
                         <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
-                                <User className="w-4 h-4 text-primary" />
+                                {u.role === 'doctor' ? <Stethoscope className="w-4 h-4 text-primary" /> : <User className="w-4 h-4 text-primary" />}
                               </div>
                               <span className="text-sm font-semibold text-gray-900">
-                                {u.email?.split('@')[0] || 'User'}
+                                {u.name || u.email?.split('@')[0] || 'User'}
                               </span>
                             </div>
                           </td>
@@ -555,9 +702,11 @@ export default function AdminDashboard() {
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
                               u.role === 'admin'
                                 ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : u.role === 'doctor'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}>
-                              {u.role || 'user'}
+                              {u.role === 'user' ? 'patient' : u.role || 'patient'}
                             </span>
                           </td>
                           <td className="px-6 py-4">
@@ -573,6 +722,79 @@ export default function AdminDashboard() {
               </div>
             )}
           </>
+        )}
+
+        {/* Invite Doctor Modal */}
+        {showInviteModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-primary" />
+                  Invite Doctor
+                </h3>
+                <button
+                  onClick={() => setShowInviteModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleInviteDoctor} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Doctor's Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="e.g. Dr. Sarah Jenkins"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="sarah@example.com"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
+                  />
+                </div>
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteModal(false)}
+                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={inviting}
+                    className={`flex-1 py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${
+                      inviting ? 'opacity-70 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {inviting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Inviting...
+                      </>
+                    ) : (
+                      'Send Invite'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
       </main>
     </div>

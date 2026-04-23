@@ -17,6 +17,7 @@ export function AuthProvider({ children }) {
   // Derive states from user
   const isAuthenticated = !!token && !!user;
   const isAdminLoggedIn = user?.role === 'admin';
+  const isDoctorLoggedIn = user?.role === 'doctor';
   const adminLoading = loading;
 
   // Persist user to localStorage whenever it changes
@@ -99,6 +100,20 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  // ─── Doctor Auth ───
+  const doctorLogin = async (email, password) => {
+    const data = await apiFetch('/doctor/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+
+    localStorage.setItem('cs_token', data.token);
+    localStorage.setItem('cs_user', JSON.stringify(data.user));
+    setToken(data.token);
+    setUser(data.user);
+    return data;
+  };
+
   // ─── Logout ───
   const logout = async () => {
     localStorage.removeItem('cs_token');
@@ -139,6 +154,7 @@ export function AuthProvider({ children }) {
         sendOtp,
         verifyOtp,
         adminLogin,
+        doctorLogin,
         logout,
         adminLogout,
         updateProfile,

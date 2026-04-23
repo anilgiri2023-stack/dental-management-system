@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Sparkles, MapPin, Phone, Mail, Clock, ArrowUp } from 'lucide-react';
+import Logo from './Logo';
 
 const quickLinks = [
   { name: 'Home', path: '/' },
@@ -29,14 +30,9 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
           {/* Brand */}
           <div>
-            <Link to="/" className="flex items-center gap-2 mb-5">
-              <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-xl font-bold text-white tracking-tight">
-                Clinical <span className="text-primary-light">Serenity</span>
-              </span>
-            </Link>
+            <div className="mb-5">
+              <Logo lightText={true} />
+            </div>
             <p className="text-gray-400 text-sm leading-relaxed">
               Redefining dental care with precision, comfort, and a commitment to your lasting well-being.
             </p>

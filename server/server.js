@@ -288,13 +288,62 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// Doctor Login (password-based)
+// ═══════════════════════════════════════════════════════════
+app.post('/api/doctor/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
+
+    // Fetch user from Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email.trim().toLowerCase())
+      .single();
+
+    if (error || !user) {
+      return res.status(401).json({ success: false, message: 'Invalid doctor credentials' });
+    }
+
+    if (user.role !== 'doctor') {
+      return res.status(403).json({ success: false, message: 'User is not a doctor' });
+    }
+
+    // Check password
+    if (user.password !== password) {
+      return res.status(401).json({ success: false, message: 'Invalid doctor credentials' });
+    }
+
+    // Generate JWT
+    const token = signToken({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      role: 'doctor',
+    });
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: 'doctor' },
+    });
+  } catch (err) {
+    console.error('Doctor login error:', err);
+    res.status(500).json({ success: false, message: 'Server error during login' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 3. POST /book-appointment
 //    Accepts: date, time, service
 //    user_id comes from JWT (NEVER from frontend)
 // ═══════════════════════════════════════════════════════════
 async function bookAppointment(req, res) {
   try {
-    const { date, time, service, phone, name, email } = req.body;
+    const { date, time, service, phone, name, email, doctor_id } = req.body;
 
     // Add console logs to confirm values before inserting into database
     console.log('--- Incoming Booking Request ---');
@@ -304,6 +353,7 @@ async function bookAppointment(req, res) {
     console.log('Service:', service);
     console.log('Date:', date);
     console.log('Time:', time);
+    console.log('Doctor ID:', doctor_id || 'Not specified');
     console.log('--------------------------------');
 
     if (!date || !time || !service || !name || !email || !phone) {
@@ -311,19 +361,26 @@ async function bookAppointment(req, res) {
     }
 
     const userId = req.user.id; // From JWT — never from body
+
+    const insertData = {
+      user_id: userId,
+      date,
+      time,
+      service,
+      phone,
+      name,
+      email,
+      status: 'Pending',
+    };
+
+    // Include doctor_id if provided
+    if (doctor_id) {
+      insertData.doctor_id = doctor_id;
+    }
     
     const { data, error } = await supabase
       .from('appointments')
-      .insert([{
-        user_id: userId,
-        date,
-        time,
-        service,
-        phone,
-        name,
-        email,
-        status: 'Pending',
-      }])
+      .insert([insertData])
       .select()
       .single();
 
@@ -351,8 +408,13 @@ async function getMyAppointments(req, res) {
   try {
     let query = supabase.from('appointments').select('*');
 
-    // Non-admin users can ONLY see their own
-    if (req.user.role !== 'admin') {
+    if (req.user.role === 'admin') {
+      // Admin sees all, no filter needed
+    } else if (req.user.role === 'doctor') {
+      // Doctor sees only their assigned appointments
+      query = query.eq('doctor_id', req.user.id);
+    } else {
+      // Regular user sees only their own
       query = query.eq('user_id', req.user.id);
     }
 
@@ -361,9 +423,9 @@ async function getMyAppointments(req, res) {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Enrich appointments with user email for admin view
+    // Enrich appointments with user email for admin and doctor view
     let enriched = data || [];
-    if (req.user.role === 'admin' && enriched.length > 0) {
+    if ((req.user.role === 'admin' || req.user.role === 'doctor') && enriched.length > 0) {
       // Get unique user IDs
       const userIds = [...new Set(enriched.map(a => a.user_id))];
       const { data: usersData } = await supabase
@@ -539,6 +601,135 @@ app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
     res.json({ success: true, users: data || [] });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch users' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/invite-doctor — admin only
+// ═══════════════════════════════════════════════════════════
+app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { email, name } = req.body;
+    if (!email || !name) {
+      return res.status(400).json({ success: false, message: 'Email and name are required' });
+    }
+
+    // 1. Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email.trim().toLowerCase())
+      .single();
+
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'User with this email already exists' });
+    }
+
+    // 2. Invite user via Supabase Auth Admin API
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+      email.trim().toLowerCase(),
+      {
+        data: { name: name.trim(), role: 'doctor' },
+        redirectTo: 'http://localhost:5173/set-password'
+      }
+    );
+
+    if (inviteError) {
+      console.error('Invite error:', inviteError);
+      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invite' });
+    }
+
+    const authUser = inviteData.user;
+
+    // 3. Insert into public.users table
+    const { error: insertError } = await supabase
+      .from('users')
+      .insert([{
+        id: authUser.id,
+        email: email.trim().toLowerCase(),
+        name: name.trim(),
+        role: 'doctor',
+        phone: 'N/A' // placeholder for required field
+      }]);
+
+    if (insertError) {
+      console.error('Insert user error:', insertError);
+      // Even if it fails to insert into users table, the auth user is created.
+      return res.status(500).json({ success: false, message: 'Invited, but failed to save to database' });
+    }
+
+    res.json({ success: true, message: 'Doctor invited successfully' });
+  } catch (error) {
+    console.error('Invite doctor error:', error);
+    res.status(500).json({ success: false, message: 'Server error during invite' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/appointments/booked-slots?date=YYYY-MM-DD
+// Returns booked time slots for a given date (auth required)
+// ═══════════════════════════════════════════════════════════
+
+// Normalize any date string to YYYY-MM-DD
+function normalizeDate(dateStr) {
+  if (!dateStr) return '';
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  // DD-MM-YYYY or DD/MM/YYYY
+  const parts = dateStr.split(/[-\/]/);
+  if (parts.length === 3 && parts[0].length <= 2) {
+    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+  }
+  // Fallback: parse with Date constructor
+  const d = new Date(dateStr);
+  if (!isNaN(d)) return d.toISOString().split('T')[0];
+  return dateStr;
+}
+
+app.get('/api/appointments/booked-slots', authMiddleware, async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'date query param is required' });
+
+    const formattedDate = normalizeDate(date);
+    console.log(`📅 Checking booked slots for: ${formattedDate} (raw: ${date})`);
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('time')
+      .eq('date', formattedDate)
+      .neq('status', 'Rejected');  // Rejected appointments free up the slot
+
+    if (error) throw error;
+
+    const bookedSlots = (data || []).map(a => a.time).filter(Boolean);
+    console.log(`📅 Found ${bookedSlots.length} booked slot(s) for ${formattedDate}:`, bookedSlots);
+    res.json({ success: true, bookedSlots });
+  } catch (error) {
+    console.error('Fetch booked slots error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch booked slots' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/doctors — list all doctors (auth required)
+// Uses service_role key so RLS doesn't block
+// ═══════════════════════════════════════════════════════════
+app.get('/api/doctors', authMiddleware, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, email')
+      .eq('role', 'doctor')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+
+    console.log(`👨‍⚕️ Found ${(data || []).length} doctor(s)`);
+    res.json({ success: true, doctors: data || [] });
+  } catch (error) {
+    console.error('Fetch doctors error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch doctors' });
   }
 });
 

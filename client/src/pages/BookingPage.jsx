@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import supabase from '../utils/supabase';
 import {
   Sparkles, ArrowLeft, Calendar, Clock, Send,
   CheckCircle2, Stethoscope, FileText, Loader2,
+  AlertCircle, UserCircle2,
 } from 'lucide-react';
+import Logo from '../components/Logo';
 
 const TIME_SLOTS = [
-  '09:00 AM','09:30 AM','10:00 AM','10:30 AM',
-  '11:00 AM','11:30 AM','12:00 PM','12:30 PM',
+  '10:00 AM','10:30 AM','11:00 AM','11:30 AM',
+  '12:00 PM','12:30 PM',
   '02:00 PM','02:30 PM','03:00 PM','03:30 PM',
   '04:00 PM','04:30 PM','05:00 PM','05:30 PM',
   '06:00 PM','06:30 PM','07:00 PM','07:30 PM',
@@ -35,15 +38,134 @@ export default function BookingPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Doctor selection state
+  const [doctors, setDoctors] = useState([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState('');
+  const [doctorsLoading, setDoctorsLoading] = useState(true);
+
+  // Slot availability state
+  const [bookedSlots, setBookedSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState('');
+
+  // Fetch doctors on mount
+  // NOTE: If RLS blocks anon read on users table, falls back to backend API
+  useEffect(() => {
+    const fetchDoctors = async () => {
+      try {
+        console.log('Fetching doctors from Supabase...');
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('role', 'doctor');
+
+        if (error) {
+          console.error('Supabase doctor fetch error:', error);
+          throw error;
+        }
+
+        console.log('Doctors from Supabase:', data);
+
+        if (data && data.length > 0) {
+          setDoctors(data);
+        } else {
+          // No data returned — likely RLS is blocking anon read access
+          // Fall back to backend API which uses service_role key
+          console.log('No doctors from Supabase (possible RLS block), trying backend API...');
+          try {
+            const res = await authFetch('/doctors');
+            console.log('Doctors from backend API:', res);
+            if (res.doctors && res.doctors.length > 0) {
+              setDoctors(res.doctors);
+            } else {
+              console.warn('No doctors found in database. Ensure users with role="doctor" exist.');
+              setDoctors([]);
+            }
+          } catch (apiErr) {
+            console.error('Backend doctor fetch error:', apiErr);
+            setDoctors([]);
+          }
+        }
+      } catch (err) {
+        console.error('Fetch doctors error:', err);
+        // Try backend API as fallback
+        try {
+          const res = await authFetch('/doctors');
+          if (res.doctors && res.doctors.length > 0) {
+            setDoctors(res.doctors);
+          }
+        } catch (apiErr) {
+          console.error('Backend fallback also failed:', apiErr);
+        }
+      } finally {
+        setDoctorsLoading(false);
+      }
+    };
+    fetchDoctors();
+  }, [authFetch]);
+
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
   const selectService = (value) => setFormData({ ...formData, service: value });
-  const selectTime = (time) => setFormData({ ...formData, time });
   const today = new Date().toISOString().split('T')[0];
+
+  // Convert date string to YYYY-MM-DD for Supabase queries
+  const toYMD = (dateStr) => {
+    if (!dateStr) return '';
+    // If already YYYY-MM-DD (from date input), return as-is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+    // Otherwise parse and convert
+    return new Date(dateStr).toISOString().split('T')[0];
+  };
+
+  // Fetch booked slots directly from Supabase whenever date changes
+  const fetchBookedSlots = useCallback(async (date) => {
+    if (!date) {
+      setBookedSlots([]);
+      return;
+    }
+    const formattedDate = toYMD(date);
+    console.log('Fetching booked slots for date:', formattedDate);
+    setSlotsLoading(true);
+    setSlotsError('');
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('time')
+        .eq('date', formattedDate)
+        .neq('status', 'Rejected');
+
+      if (error) throw error;
+
+      const slots = (data || []).map(item => item.time).filter(Boolean);
+      console.log('Booked slots found:', slots);
+      setBookedSlots(slots);
+    } catch (err) {
+      console.error('Fetch booked slots error:', err);
+      setSlotsError('Could not check slot availability');
+      setBookedSlots([]);
+    } finally {
+      setSlotsLoading(false);
+    }
+  }, []);
+
+  // When date changes, fetch booked slots and clear selected time
+  const handleDateChange = (e) => {
+    const newDate = e.target.value;
+    setFormData({ ...formData, date: newDate, time: '' });
+    fetchBookedSlots(newDate);
+  };
+
+  const selectTime = (time) => {
+    // Don't allow selecting booked slots
+    if (bookedSlots.includes(time)) return;
+    setFormData({ ...formData, time });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     if (!formData.service) { setError('Please select a service'); return; }
+    if (!selectedDoctorId) { setError('Please select a doctor'); return; }
     if (!formData.date) { setError('Please select a date'); return; }
     if (!formData.time) { setError('Please select a time slot'); return; }
 
@@ -57,6 +179,7 @@ export default function BookingPage() {
         date: formData.date,
         time: formData.time,
         notes: formData.notes,
+        doctor_id: selectedDoctorId,
       };
       console.log('Booking payload:', payload);
       await authFetch('/appointments', { method: 'POST', body: JSON.stringify(payload) });
@@ -84,6 +207,7 @@ export default function BookingPage() {
                 ['Patient', user?.name || 'Patient'],
                 ['Email', user?.email || '—'],
                 ['Phone', user?.phone || '—'],
+                ['Doctor', doctors.find(d => d.id === selectedDoctorId)?.name || '—'],
                 ['Service', SERVICES.find(s => s.value === formData.service)?.label || formData.service],
                 ['Date', new Date(formData.date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})],
                 ['Time', formData.time],
@@ -101,12 +225,14 @@ export default function BookingPage() {
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <Link to="/dashboard" className="flex-1 inline-flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark transition-all">View Dashboard</Link>
-            <button onClick={() => { setSubmitted(false); setFormData({ date:'', time:'', service:'', notes:'' }); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all">Book Another</button>
+            <button onClick={() => { setSubmitted(false); setFormData({ date:'', time:'', service:'', notes:'' }); setSelectedDoctorId(''); setBookedSlots([]); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all">Book Another</button>
           </div>
         </div>
       </div>
     );
   }
+
+  const availableCount = TIME_SLOTS.length - bookedSlots.length;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -115,10 +241,9 @@ export default function BookingPage() {
           <Link to="/dashboard" className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary transition-colors">
             <ArrowLeft className="w-4 h-4" /> Dashboard
           </Link>
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center"><Sparkles className="w-4 h-4 text-white" /></div>
-            <span className="text-sm font-bold text-gray-900 tracking-tight hidden sm:inline">Clinical <span className="text-primary">Serenity</span></span>
-          </Link>
+          <div className="hidden sm:block">
+            <Logo className="scale-75 origin-right" />
+          </div>
         </div>
       </header>
 
@@ -133,9 +258,10 @@ export default function BookingPage() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             {error}
-            <button onClick={() => setError('')} className="ml-4 text-red-400 hover:text-red-600">✕</button>
+            <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">✕</button>
           </div>
         )}
 
@@ -160,30 +286,138 @@ export default function BookingPage() {
             </div>
           </div>
 
+          {/* Doctor Selection */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+            <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <UserCircle2 className="w-4 h-4 text-primary" /> Select Doctor
+            </h2>
+            {doctorsLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-gray-400">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>Loading doctors...</span>
+              </div>
+            ) : doctors.length === 0 ? (
+              <div className="flex items-center gap-2 p-4 bg-amber-50 rounded-xl border border-amber-100 text-sm text-amber-600">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>No doctors available at the moment.</span>
+              </div>
+            ) : (
+              <select
+                id="doctor-select"
+                value={selectedDoctorId}
+                onChange={(e) => setSelectedDoctorId(e.target.value)}
+                required
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all appearance-none cursor-pointer"
+              >
+                <option value="">— Choose a doctor —</option>
+                {doctors.map((doc) => (
+                  <option key={doc.id} value={doc.id}>
+                    Dr. {doc.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {/* Date & Time */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-primary" /> Date & Time
             </h2>
+
+            {/* Date Picker */}
             <div className="mb-6">
               <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">Preferred Date</label>
-              <input type="date" name="date" value={formData.date} onChange={handleChange} min={today} required
+              <input type="date" name="date" value={formData.date} onChange={handleDateChange} min={today} required
                 className="w-full sm:w-auto px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all" />
             </div>
+
+            {/* Time Slots */}
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" /> Time Slot
-              </label>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {TIME_SLOTS.map((slot) => (
-                  <button key={slot} type="button" onClick={() => selectTime(slot)}
-                    className={`py-2.5 px-3 rounded-lg border text-xs font-medium transition-all duration-200 ${
-                      formData.time === slot
-                        ? 'border-primary bg-primary text-white shadow-sm'
-                        : 'border-gray-200 bg-white text-gray-600 hover:border-primary/50 hover:text-primary'
-                    }`}>{slot}</button>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5" /> Time Slot
+                </label>
+                {formData.date && !slotsLoading && (
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                    availableCount > 0
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                      : 'bg-red-50 text-red-500 border border-red-200'
+                  }`}>
+                    {availableCount} of {TIME_SLOTS.length} available
+                  </span>
+                )}
               </div>
+
+              {!formData.date ? (
+                /* Prompt to select date first */
+                <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100 text-sm text-gray-400">
+                  <Calendar className="w-5 h-5 text-gray-300 shrink-0" />
+                  <span>Please select a date to view available time slots</span>
+                </div>
+              ) : slotsLoading ? (
+                /* Loading state */
+                <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-400">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <span>Checking availability...</span>
+                </div>
+              ) : null}
+
+              {/* Slot Grid — shown when date is selected and not loading */}
+              {formData.date && !slotsLoading && (
+                <>
+                  {slotsError && (
+                    <div className="flex items-center gap-2 p-4 mb-3 bg-amber-50 rounded-xl border border-amber-100 text-sm text-amber-600">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{slotsError}. You can still select a time slot.</span>
+                    </div>
+                  )}
+                  {!slotsError && availableCount === 0 ? (
+                    <div className="text-center py-8">
+                      <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                        <AlertCircle className="w-7 h-7 text-red-400" />
+                      </div>
+                      <h3 className="text-base font-semibold text-gray-700 mb-1">Fully Booked</h3>
+                      <p className="text-sm text-gray-400">All slots are taken for this date. Please select another date.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+                      {TIME_SLOTS.map((slot) => {
+                        const isBooked = bookedSlots.includes(slot);
+                        const isSelected = formData.time === slot;
+                        return (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => selectTime(slot)}
+                            disabled={isBooked}
+                            id={`slot-${slot.replace(/[: ]/g, '-')}`}
+                            className={`relative py-2.5 px-3 rounded-xl border text-xs font-medium transition-all duration-200 ${
+                              isBooked
+                                ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed line-through'
+                                : isSelected
+                                  ? 'border-primary bg-primary text-white shadow-md shadow-primary/25 scale-[1.02]'
+                                  : 'border-gray-200 bg-white text-gray-600 hover:border-primary/50 hover:text-primary hover:shadow-sm'
+                            }`}
+                          >
+                            {slot}
+                            {isBooked && (
+                              <span className="absolute -top-1.5 -right-1.5 bg-red-100 text-red-500 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none border border-red-200">
+                                Booked
+                              </span>
+                            )}
+                            {isSelected && (
+                              <CheckCircle2 className="w-3 h-3 absolute -top-1 -right-1 text-white bg-primary rounded-full" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+
             </div>
           </div>
 

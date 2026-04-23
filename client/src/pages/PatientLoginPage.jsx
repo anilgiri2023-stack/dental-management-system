@@ -6,11 +6,12 @@ import {
   Sparkles, ArrowRight, CheckCircle2, Mail, Phone,
   ShieldCheck, ArrowLeft, RefreshCw, Loader2, UserPlus, LogIn,
 } from 'lucide-react';
+import Logo from '../components/Logo';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
 
-export default function LoginPage() {
+export default function PatientLoginPage() {
   // Steps: 'email' → 'details' (new users only) → 'otp'
   const [step, setStep] = useState('email');
   const [isNewUser, setIsNewUser] = useState(false);
@@ -196,19 +197,14 @@ export default function LoginPage() {
         <div className="flex items-center justify-center px-6 py-12 lg:px-16">
           <div className="w-full max-w-md animate-fade-in-left">
             {/* Logo */}
-            <Link to="/" className="flex items-center gap-2 mb-10 group">
-              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-2xl font-bold text-gray-900 tracking-tight">
-                Clinical <span className="text-primary">Serenity</span>
-              </span>
-            </Link>
+            <div className="mb-10">
+              <Logo />
+            </div>
 
             {step === 'email' && (
               <>
                 <div className="mb-8">
-                  <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome</h1>
+                  <h1 className="text-3xl font-bold text-gray-900 mb-2">Patient Login</h1>
                   <p className="text-gray-500 text-sm">Sign in or create account — no password needed</p>
                   <p className="text-primary/80 text-xs mt-2 font-medium">Already registered? Just enter your email to login</p>
                 </div>

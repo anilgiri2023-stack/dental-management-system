@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, Sparkles, LogOut, LogIn, User, LayoutDashboard } from 'lucide-react';
+import { Menu, X, LogOut, LogIn, User, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import Logo from "../components/Logo";
 
 const navLinks = [
   { name: 'Home', path: '/' },
@@ -13,6 +14,7 @@ const navLinks = [
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isLoginDropdownOpen, setIsLoginDropdownOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -26,6 +28,7 @@ export default function Navbar() {
 
   useEffect(() => {
     setIsOpen(false);
+    setIsLoginDropdownOpen(false);
   }, [location]);
 
   const handleLogout = async () => {
@@ -50,14 +53,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold text-gray-900 tracking-tight">
-              Clinical <span className="text-primary">Serenity</span>
-            </span>
-          </Link>
+          <Logo />
 
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-1">
@@ -103,13 +99,39 @@ export default function Navbar() {
                 </button>
               </>
             ) : (
-              <Link
-                to="/login"
-                className="inline-flex items-center gap-2 bg-gray-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-gray-800 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-              >
-                <LogIn className="w-4 h-4" />
-                Login / Sign Up
-              </Link>
+              <div className="relative">
+                <button
+                  onClick={() => setIsLoginDropdownOpen(!isLoginDropdownOpen)}
+                  className="inline-flex items-center gap-2 bg-gray-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-gray-800 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Login / Sign Up
+                </button>
+                
+                {/* Dropdown Menu */}
+                {isLoginDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden animate-fade-in-up">
+                    <Link
+                      to="/login/patient"
+                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors border-b border-gray-50"
+                    >
+                      Patient Login
+                    </Link>
+                    <Link
+                      to="/login/doctor"
+                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors border-b border-gray-50"
+                    >
+                      Doctor Login
+                    </Link>
+                    <Link
+                      to="/login/admin"
+                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors"
+                    >
+                      Admin Login
+                    </Link>
+                  </div>
+                )}
+              </div>
             )}
             <Link
               to={isAuthenticated ? "/dashboard/book" : "/login"}
@@ -177,15 +199,27 @@ export default function Navbar() {
                 </button>
               </>
             ) : (
-              <Link
-                to="/login"
-                className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <LogIn className="w-4 h-4" />
-                  Login / Sign Up
-                </span>
-              </Link>
+              <div className="space-y-1 mt-2 border-t border-gray-200 pt-2">
+                <p className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Login Portals</p>
+                <Link
+                  to="/login/patient"
+                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
+                >
+                  Patient Login
+                </Link>
+                <Link
+                  to="/login/doctor"
+                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
+                >
+                  Doctor Login
+                </Link>
+                <Link
+                  to="/login/admin"
+                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
+                >
+                  Admin Login
+                </Link>
+              </div>
             )}
 
             <Link

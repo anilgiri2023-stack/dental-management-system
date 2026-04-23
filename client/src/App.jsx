@@ -5,6 +5,7 @@ import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from './components/ProtectedRoute';
 import UserProtectedRoute from './components/UserProtectedRoute';
+import DoctorProtectedRoute from './components/DoctorProtectedRoute';
 
 // Public Pages
 import Home from './pages/Home';
@@ -15,12 +16,17 @@ import GalleryPage from './pages/GalleryPage';
 import ContactPage from './pages/ContactPage';
 
 // Auth Pages
-import LoginPage from './pages/LoginPage';
+import PatientLoginPage from './pages/PatientLoginPage';
+import DoctorLoginPage from './pages/DoctorLoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
+import SetPassword from './pages/SetPassword';
 
 // Protected User Pages
 import UserDashboard from './pages/UserDashboard';
 import BookingPage from './pages/BookingPage';
+
+// Protected Doctor Pages
+import DoctorDashboard from './pages/DoctorDashboard';
 
 // Protected Admin Pages
 import AdminDashboard from './pages/AdminDashboard';
@@ -50,8 +56,12 @@ function App() {
           <Route path="/gallery" element={<PublicLayout><GalleryPage /></PublicLayout>} />
           <Route path="/book" element={<Navigate to="/dashboard/book" replace />} />
 
-          {/* OTP-based auth (no Navbar/Footer) */}
-          <Route path="/login" element={<LoginPage />} />
+          {/* Auth Routes (no Navbar/Footer) */}
+          <Route path="/login" element={<Navigate to="/login/patient" replace />} />
+          <Route path="/login/patient" element={<PatientLoginPage />} />
+          <Route path="/login/doctor" element={<DoctorLoginPage />} />
+          <Route path="/login/admin" element={<AdminLoginPage />} />
+          <Route path="/set-password" element={<SetPassword />} />
 
           {/* User dashboard (protected, no Navbar/Footer — has its own header) */}
           <Route
@@ -71,8 +81,18 @@ function App() {
             }
           />
 
-          {/* Hidden admin login — NOT linked anywhere in UI */}
-          <Route path="/admin-login" element={<AdminLoginPage />} />
+          {/* Doctor dashboard (protected, no Navbar/Footer) */}
+          <Route
+            path="/doctor/dashboard"
+            element={
+              <DoctorProtectedRoute>
+                <DoctorDashboard />
+              </DoctorProtectedRoute>
+            }
+          />
+
+          {/* Hidden admin login — NOT linked anywhere in UI (Deprecated path, redirects to new) */}
+          <Route path="/admin-login" element={<Navigate to="/login/admin" replace />} />
 
           {/* Protected admin routes */}
           <Route

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Eye, EyeOff, Sparkles, Loader2 } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
+import Logo from '../components/Logo';
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
@@ -42,14 +43,9 @@ export default function AdminLoginPage() {
 
       <div className="relative z-10 w-full max-w-md px-6 py-12">
         {/* Logo */}
-        <Link to="/" className="flex items-center justify-center gap-2 mb-10 group">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-2xl font-bold text-white tracking-tight">
-            Clinical <span className="text-primary-light">Serenity</span>
-          </span>
-        </Link>
+        <div className="mb-10 flex justify-center">
+          <Logo lightText={true} />
+        </div>
 
         {/* Card */}
         <div className="bg-gray-800/60 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-700/50 p-8 animate-fade-in-up">
