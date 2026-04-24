@@ -8,6 +8,10 @@ const dotenv = require('dotenv');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
 
 dotenv.config();
@@ -75,6 +79,34 @@ function adminOnly(req, res, next) {
   }
   next();
 }
+
+function doctorOnly(req, res, next) {
+  if (req.user?.role !== 'doctor') {
+    return res.status(403).json({ success: false, message: 'Doctor only' });
+  }
+  next();
+}
+
+function patientOnly(req, res, next) {
+  if (req.user?.role !== 'user' && req.user?.role !== 'patient') {
+    return res.status(403).json({ success: false, message: 'Patient only' });
+  }
+  next();
+}
+
+// ─── Multer (memory storage for Supabase upload) ────────
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, JPG, PNG, and WebP files are allowed'));
+    }
+  },
+});
 
 // ═══════════════════════════════════════════════════════════
 // 1. POST /send-otp
@@ -288,34 +320,42 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// Doctor Login (password-based)
+// Doctor Login (Supabase Auth based)
 // ═══════════════════════════════════════════════════════════
 app.post('/api/doctor/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
 
-    // Fetch user from Supabase
-    const { data: user, error } = await supabase
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // 1. Verify credentials via Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password,
+    });
+
+    if (authError || !authData?.user) {
+      console.log('Doctor auth failed:', authError?.message);
+      return res.status(401).json({ success: false, message: 'Wrong email or password' });
+    }
+
+    // 2. Fetch user from our users table to check role
+    const { data: user, error: dbError } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email.trim().toLowerCase())
+      .eq('email', trimmedEmail)
       .single();
 
-    if (error || !user) {
-      return res.status(401).json({ success: false, message: 'Invalid doctor credentials' });
+    if (dbError || !user) {
+      return res.status(401).json({ success: false, message: 'Doctor account not found in system' });
     }
 
     if (user.role !== 'doctor') {
-      return res.status(403).json({ success: false, message: 'User is not a doctor' });
+      return res.status(403).json({ success: false, message: 'This account is not a doctor account' });
     }
 
-    // Check password
-    if (user.password !== password) {
-      return res.status(401).json({ success: false, message: 'Invalid doctor credentials' });
-    }
-
-    // Generate JWT
+    // 3. Generate our custom JWT for the app
     const token = signToken({
       id: user.id,
       email: user.email,
@@ -324,6 +364,7 @@ app.post('/api/doctor/login', async (req, res) => {
       role: 'doctor',
     });
 
+    console.log(`✅ Doctor login: ${user.email}`);
     res.json({
       success: true,
       message: 'Login successful',
@@ -332,7 +373,7 @@ app.post('/api/doctor/login', async (req, res) => {
     });
   } catch (err) {
     console.error('Doctor login error:', err);
-    res.status(500).json({ success: false, message: 'Server error during login' });
+    res.status(500).json({ success: false, message: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -625,23 +666,53 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
       return res.status(400).json({ success: false, message: 'User with this email already exists' });
     }
 
-    // 2. Invite user via Supabase Auth Admin API
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
-      email.trim().toLowerCase(),
-      {
+    // 2. Generate invite link via Supabase Auth Admin API
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: 'invite',
+      email: email.trim().toLowerCase(),
+      options: {
         data: { name: name.trim(), role: 'doctor' },
         redirectTo: 'http://localhost:5173/set-password'
       }
-    );
+    });
 
-    if (inviteError) {
-      console.error('Invite error:', inviteError);
-      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invite' });
+    if (linkError) {
+      console.error('GENERATE LINK FAILED — Invite error:', linkError);
+      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate invite link' });
     }
 
-    const authUser = inviteData.user;
+    const actionLink = linkData.properties?.action_link;
+    const authUser = linkData.user;
 
-    // 3. Insert into public.users table
+    // 3. Send email via Nodemailer
+    try {
+      await transporter.sendMail({
+        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+        to: email.trim().toLowerCase(),
+        subject: 'Doctor Invitation — Clinical Serenity',
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
+            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
+            <p style="color:#475569;font-size:15px">Hi Dr. ${name},</p>
+            <p style="color:#475569;font-size:15px">You have been invited to join Clinical Serenity as a Doctor.</p>
+            <div style="text-align:center;margin:30px 0;">
+              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Accept Invitation & Set Password</a>
+            </div>
+            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
+          </div>
+        `
+      });
+      console.log('EMAIL SENT SUCCESS — Doctor invited:', email);
+    } catch (emailErr) {
+      console.error('EMAIL SEND FAILED:', emailErr);
+      // We still created the user in auth, maybe we shouldn't insert to public.users?
+      // Actually we should fail the request if email fails so they can retry.
+      // But user is already in auth... Let's delete them from auth if email fails
+      await supabase.auth.admin.deleteUser(authUser.id);
+      return res.status(500).json({ success: false, message: 'Failed to send invite email. Please try again.' });
+    }
+
+    // 4. Insert into public.users table
     const { error: insertError } = await supabase
       .from('users')
       .insert([{
@@ -649,19 +720,54 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
         email: email.trim().toLowerCase(),
         name: name.trim(),
         role: 'doctor',
-        phone: 'N/A' // placeholder for required field
+        phone: 'N/A'
       }]);
 
     if (insertError) {
-      console.error('Insert user error:', insertError);
-      // Even if it fails to insert into users table, the auth user is created.
+      console.error('INSERT USER FAILED — error:', insertError);
       return res.status(500).json({ success: false, message: 'Invited, but failed to save to database' });
     }
 
-    res.json({ success: true, message: 'Doctor invited successfully' });
+    res.json({ success: true, message: 'Doctor invited successfully. Email sent to ' + email });
   } catch (error) {
-    console.error('Invite doctor error:', error);
+    console.error('SERVER ERROR — Invite doctor:', error);
     res.status(500).json({ success: false, message: 'Server error during invite' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// DELETE /api/admin/delete-user/:id — admin only
+// Deletes user from users table AND Supabase Auth
+// ═══════════════════════════════════════════════════════════
+app.delete('/api/admin/delete-user/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🗑️ Admin deleting user: ${id}`);
+
+    // 1. Delete associated reports
+    const { error: reportsErr } = await supabase.from('reports').delete().eq('patient_id', id);
+    if (reportsErr) console.warn('Reports cleanup warning:', reportsErr.message);
+
+    // 2. Delete from users table (appointments cascade via FK)
+    const { error: dbError } = await supabase.from('users').delete().eq('id', id);
+    if (dbError) {
+      console.error('❌ Delete user DB error:', dbError);
+      return res.status(500).json({ success: false, message: dbError.message });
+    }
+    console.log(`✅ User ${id} deleted from users table`);
+
+    // 3. Delete from Supabase Auth (may not exist for OTP-only users)
+    const { error: authErr } = await supabase.auth.admin.deleteUser(id);
+    if (authErr) {
+      console.warn(`⚠️ Auth delete skipped for ${id}: ${authErr.message}`);
+    } else {
+      console.log(`✅ User ${id} deleted from auth.users`);
+    }
+
+    return res.status(200).json({ success: true, message: 'User deleted successfully' });
+  } catch (err) {
+    console.error('❌ Delete user error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -734,10 +840,326 @@ app.get('/api/doctors', authMiddleware, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/auth/reset-password — send reset email
+// ═══════════════════════════════════════════════════════════
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+    // Generate password reset link via Supabase
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: 'recovery',
+      email: email.trim().toLowerCase(),
+      options: { redirectTo: 'http://localhost:5173/reset-password' }
+    });
+
+    if (linkError) {
+      console.error('GENERATE LINK FAILED — Reset password:', linkError);
+      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate reset link' });
+    }
+
+    const actionLink = linkData.properties?.action_link;
+
+    // Send via Nodemailer
+    try {
+      await transporter.sendMail({
+        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+        to: email.trim().toLowerCase(),
+        subject: 'Password Reset — Clinical Serenity',
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
+            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
+            <p style="color:#475569;font-size:15px">You requested a password reset.</p>
+            <div style="text-align:center;margin:30px 0;">
+              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Reset Password</a>
+            </div>
+            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
+            <p style="color:#94a3b8;font-size:13px">If you didn't request this, ignore this email.</p>
+          </div>
+        `
+      });
+      console.log('EMAIL SENT SUCCESS — Reset password for:', email);
+      res.json({ success: true, message: 'Password reset email sent to ' + email });
+    } catch (emailErr) {
+      console.error('EMAIL FAILED — Reset password email error:', emailErr);
+      res.status(500).json({ success: false, message: 'Failed to send reset email' });
+    }
+  } catch (err) {
+    console.error('SERVER ERROR — Reset password:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/admin/analytics — admin analytics data
+// ═══════════════════════════════════════════════════════════
+app.get('/api/admin/analytics', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    // Total patients
+    const { count: totalPatients } = await supabase
+      .from('users').select('*', { count: 'exact', head: true })
+      .or('role.eq.user,role.eq.patient');
+
+    // Total doctors
+    const { count: totalDoctors } = await supabase
+      .from('users').select('*', { count: 'exact', head: true })
+      .eq('role', 'doctor');
+
+    // All appointments for analytics
+    const { data: allApts } = await supabase
+      .from('appointments').select('service, date, status').order('date', { ascending: false });
+
+    // Monthly bookings (last 12 months)
+    const monthlyBookings = {};
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthlyBookings[key] = 0;
+    }
+    (allApts || []).forEach(apt => {
+      if (!apt.date) return;
+      const key = apt.date.substring(0, 7); // YYYY-MM
+      if (monthlyBookings.hasOwnProperty(key)) monthlyBookings[key]++;
+    });
+
+    // Popular services
+    const serviceCounts = {};
+    (allApts || []).forEach(apt => {
+      serviceCounts[apt.service] = (serviceCounts[apt.service] || 0) + 1;
+    });
+    const popularServices = Object.entries(serviceCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([service, count]) => ({ service, count }));
+
+    // Status breakdown
+    const statusBreakdown = { Pending: 0, Approved: 0, Rejected: 0 };
+    (allApts || []).forEach(apt => {
+      if (statusBreakdown.hasOwnProperty(apt.status)) statusBreakdown[apt.status]++;
+    });
+
+    res.json({
+      success: true,
+      analytics: {
+        totalPatients: totalPatients || 0,
+        totalDoctors: totalDoctors || 0,
+        totalAppointments: (allApts || []).length,
+        monthlyBookings,
+        popularServices,
+        statusBreakdown,
+      },
+    });
+  } catch (err) {
+    console.error('Analytics error:', err);
+    res.status(500).json({ success: false, message: 'Failed to load analytics' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/upload-report — doctor uploads report file
+// ═══════════════════════════════════════════════════════════
+app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file'), async (req, res) => {
+  try {
+    const { patient_id, notes } = req.body;
+    const file = req.file;
+
+    if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    if (!patient_id) return res.status(400).json({ success: false, message: 'Patient ID is required' });
+
+    // Upload to Supabase Storage
+    const ext = path.extname(file.originalname);
+    const fileName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
+    const filePath = `reports/${patient_id}/${fileName}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('reports')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (uploadErr) {
+      console.error('Storage upload error:', uploadErr);
+      return res.status(500).json({ success: false, message: 'Failed to upload file: ' + uploadErr.message });
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage.from('reports').getPublicUrl(filePath);
+    const fileUrl = urlData?.publicUrl;
+
+    // Save record in DB
+    const { data: report, error: dbErr } = await supabase
+      .from('reports')
+      .insert([{
+        patient_id,
+        doctor_id: req.user.id,
+        file_url: fileUrl,
+        file_name: file.originalname,
+        file_type: file.mimetype,
+        notes: notes || '',
+      }])
+      .select()
+      .single();
+
+    if (dbErr) {
+      console.error('Report DB insert error:', dbErr);
+      return res.status(500).json({ success: false, message: 'File uploaded but failed to save record' });
+    }
+
+    console.log(`📄 Report uploaded by Dr. ${req.user.name} for patient ${patient_id}`);
+    res.status(201).json({ success: true, message: 'Report uploaded', report });
+  } catch (err) {
+    console.error('Upload report error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to upload report' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/patient/reports — patient views their reports
+// ═══════════════════════════════════════════════════════════
+app.get('/api/patient/reports', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('patient_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Enrich with doctor name
+    let enriched = data || [];
+    if (enriched.length > 0) {
+      const docIds = [...new Set(enriched.map(r => r.doctor_id).filter(Boolean))];
+      if (docIds.length > 0) {
+        const { data: docs } = await supabase.from('users').select('id, name').in('id', docIds);
+        const docMap = {};
+        (docs || []).forEach(d => { docMap[d.id] = d.name; });
+        enriched = enriched.map(r => ({ ...r, doctor_name: docMap[r.doctor_id] || 'Doctor' }));
+      }
+    }
+
+    res.json({ success: true, reports: enriched });
+  } catch (err) {
+    console.error('Fetch patient reports error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch reports' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/doctor/patients — doctor's unique patients
+// ═══════════════════════════════════════════════════════════
+app.get('/api/doctor/patients', authMiddleware, doctorOnly, async (req, res) => {
+  try {
+    const { data: apts, error } = await supabase
+      .from('appointments')
+      .select('user_id, name, email, phone')
+      .eq('doctor_id', req.user.id);
+
+    if (error) throw error;
+
+    // Deduplicate by user_id
+    const patientMap = {};
+    (apts || []).forEach(apt => {
+      if (!patientMap[apt.user_id]) {
+        patientMap[apt.user_id] = {
+          id: apt.user_id,
+          name: apt.name || 'Patient',
+          email: apt.email || '',
+          phone: apt.phone || '',
+        };
+      }
+    });
+
+    res.json({ success: true, patients: Object.values(patientMap) });
+  } catch (err) {
+    console.error('Doctor patients error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch patients' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // Health check
 // ═══════════════════════════════════════════════════════════
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT });
+});
+
+// ═══════════════════════════════════════════════════════════
+// JSON 404 handler (no HTML responses)
+// ═══════════════════════════════════════════════════════════
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: 'Endpoint not found' });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Global error handler (returns JSON, never HTML)
+// ═══════════════════════════════════════════════════════════
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ success: false, message: 'File upload error: ' + err.message });
+  }
+  res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Cron: Daily appointment reminders (8 AM every day)
+// ═══════════════════════════════════════════════════════════
+cron.schedule('0 8 * * *', async () => {
+  console.log('⏰ Running appointment reminder cron job...');
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const { data: apts, error } = await supabase
+      .from('appointments')
+      .select('*, users!appointments_user_id_fkey(email, name)')
+      .eq('date', tomorrowStr)
+      .eq('status', 'Approved');
+
+    if (error) {
+      console.error('Reminder cron DB error:', error);
+      return;
+    }
+
+    console.log(`📧 Found ${(apts || []).length} appointment(s) for tomorrow (${tomorrowStr})`);
+
+    for (const apt of (apts || [])) {
+      const email = apt.email || apt.users?.email;
+      if (!email) continue;
+
+      try {
+        await transporter.sendMail({
+          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+          to: email,
+          subject: '📅 Appointment Reminder — Clinical Serenity',
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
+              <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
+              <p style="color:#475569;font-size:15px">Hi ${apt.name || 'Patient'},</p>
+              <p style="color:#475569;font-size:15px">This is a reminder that you have an appointment <strong>tomorrow</strong>:</p>
+              <div style="background:#f0fdfa;border:2px solid #0D9488;border-radius:12px;padding:20px;margin:16px 0">
+                <p style="margin:4px 0;color:#0f172a"><strong>Service:</strong> ${apt.service}</p>
+                <p style="margin:4px 0;color:#0f172a"><strong>Date:</strong> ${tomorrowStr}</p>
+                <p style="margin:4px 0;color:#0f172a"><strong>Time:</strong> ${apt.time || 'TBD'}</p>
+              </div>
+              <p style="color:#94a3b8;font-size:13px">If you need to reschedule, please contact us.</p>
+            </div>
+          `,
+        });
+        console.log(`✅ Reminder sent to ${email}`);
+      } catch (emailErr) {
+        console.error(`❌ Reminder failed for ${email}:`, emailErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('Reminder cron error:', err);
+  }
 });
 
 // ─── Start ───────────────────────────────────────────────
@@ -752,10 +1174,9 @@ app.listen(PORT, async () => {
     const { error: uErr } = await supabase.from('users').select('id').limit(1);
     console.log(uErr ? `❌ users table: ${uErr.message}` : '✅ users table OK');
     const { error: aErr } = await supabase.from('appointments').select('id, name, email, phone').limit(1);
-    console.log(aErr ? `❌ appointments table: ${aErr.message}` : '✅ appointments table OK (name, email, phone columns verified)');
-    if (aErr && aErr.message.includes('schema cache')) {
-      console.log('⚠️  Schema cache issue detected. Run: NOTIFY pgrst, \'reload schema\'; in Supabase SQL Editor');
-    }
+    console.log(aErr ? `❌ appointments table: ${aErr.message}` : '✅ appointments table OK');
+    const { error: rErr } = await supabase.from('reports').select('id').limit(1);
+    console.log(rErr ? `⚠️  reports table: ${rErr.message} (run migration-v2.sql)` : '✅ reports table OK');
   } catch (e) {
     console.error('❌ DB check failed:', e.message);
   }
@@ -771,7 +1192,14 @@ app.listen(PORT, async () => {
   console.log('  POST /verify-otp');
   console.log('  POST /book-appointment');
   console.log('  GET  /my-appointments');
-  console.log('  GET  /all-appointments (admin)');
-  console.log('  PUT  /update-status    (admin)');
+  console.log('  GET  /all-appointments       (admin)');
+  console.log('  PUT  /update-status           (admin)');
+  console.log('  DEL  /admin/delete-user/:id   (admin)');
+  console.log('  GET  /admin/analytics         (admin)');
+  console.log('  POST /auth/reset-password');
+  console.log('  POST /upload-report           (doctor)');
+  console.log('  GET  /patient/reports');
+  console.log('  GET  /doctor/patients          (doctor)');
+  console.log('  ⏰  Cron: daily reminder at 8 AM');
   console.log('');
 });
