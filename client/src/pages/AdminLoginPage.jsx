@@ -3,13 +3,16 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
 import Logo from '../components/Logo';
+import { supabase } from '../utils/supabase';
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const { adminLogin } = useAuth();
   const navigate = useNavigate();
 
@@ -23,6 +26,35 @@ export default function AdminLoginPage() {
     } catch (err) {
       console.error('Admin login error:', err);
       setError(err.message || 'Admin login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!email) {
+      setError('Please enter your admin email address first.');
+      return;
+    }
+    setError('');
+    setSuccessMsg('');
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'http://localhost:5173/reset-password',
+      });
+
+      if (error) {
+        setError(error.message);
+      } else {
+        console.log("Reset email sent to:", email);
+        setSuccessMsg("Check your inbox or spam folder");
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to send reset link.');
     } finally {
       setLoading(false);
     }
@@ -68,7 +100,13 @@ export default function AdminLoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {successMsg && (
+            <div className="mb-6 p-4 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm font-medium animate-fade-in-up">
+              {successMsg}
+            </div>
+          )}
+
+          <form onSubmit={forgotPasswordMode ? handleForgotPassword : handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">
                   Admin Email
@@ -84,29 +122,36 @@ export default function AdminLoginPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    id="admin-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full px-4 py-3 rounded-xl border border-gray-600/50 bg-gray-700/50 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all placeholder:text-gray-500 pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              {!forgotPasswordMode && (
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Password
+                    </label>
+                    <button type="button" onClick={() => { setForgotPasswordMode(true); setError(''); setSuccessMsg(''); }} className="text-xs font-medium text-primary hover:text-primary-light transition-colors">
+                      Forgot Password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      id="admin-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-600/50 bg-gray-700/50 text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all placeholder:text-gray-500 pr-12"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
             <button
               type="submit"
@@ -117,16 +162,24 @@ export default function AdminLoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Authenticating...
+                  {forgotPasswordMode ? 'Sending...' : 'Authenticating...'}
                 </>
               ) : (
-                <>
-                  <Shield className="w-4 h-4" />
-                  Access Dashboard
-                </>
+                forgotPasswordMode ? 'Send Reset Link' : (
+                  <>
+                    <Shield className="w-4 h-4" />
+                    Access Dashboard
+                  </>
+                )
               )}
             </button>
           </form>
+
+          {forgotPasswordMode && (
+            <p className="text-center mt-6 text-sm text-gray-400">
+              Remembered your password? <button onClick={() => { setForgotPasswordMode(false); setError(''); setSuccessMsg(''); }} className="text-primary hover:text-primary-light font-medium transition-colors">Log in</button>
+            </p>
+          )}
         </div>
 
         {/* Back to site */}

@@ -51,6 +51,8 @@ export default function BookingPage() {
   // Fetch doctors on mount
   // NOTE: If RLS blocks anon read on users table, falls back to backend API
   useEffect(() => {
+    if (!user) return;
+    
     const fetchDoctors = async () => {
       try {
         console.log('Fetching doctors from Supabase...');

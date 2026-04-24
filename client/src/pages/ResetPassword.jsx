@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../utils/supabase';
 
-export default function SetPassword() {
+export default function ResetPassword() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -11,6 +11,7 @@ export default function SetPassword() {
   const [initializing, setInitializing] = useState(true);
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const handleAuthSession = async () => {
@@ -22,15 +23,15 @@ export default function SetPassword() {
           const params = new URLSearchParams(hash.replace('#', ''));
           const access_token = params.get('access_token');
           const refresh_token = params.get('refresh_token') || access_token;
-          const type = params.get('type'); // 'invite' or 'recovery'
+          const type = params.get('type'); // 'recovery'
 
           if (!access_token) {
-            setError('Invalid invite link. No access token found.');
+            setError('Invalid reset link. No access token found.');
             setInitializing(false);
             return;
           }
 
-          console.log('Setting session from invite link, type:', type);
+          console.log('Setting session from reset link, type:', type);
 
           // Set session using extracted tokens
           const { data, error: sessionError } = await supabase.auth.setSession({
@@ -41,9 +42,9 @@ export default function SetPassword() {
           if (sessionError) {
             console.error('Session error:', sessionError);
             if (sessionError.message?.includes('expired') || sessionError.message?.includes('invalid')) {
-              setError('This invite link has expired. Please ask your admin to send a new invitation.');
+              setError('This reset link has expired. Please request a new one.');
             } else {
-              setError(sessionError.message || 'Failed to verify invite link.');
+              setError(sessionError.message || 'Failed to verify reset link.');
             }
             setInitializing(false);
             return;
@@ -55,7 +56,7 @@ export default function SetPassword() {
             // Clean URL hash
             window.history.replaceState(null, '', window.location.pathname);
           } else {
-            setError('Could not establish session. The invite link may have expired. Please ask your admin to resend the invitation.');
+            setError('Could not establish session. The link may have expired.');
           }
           setInitializing(false);
         } else {
@@ -64,13 +65,13 @@ export default function SetPassword() {
           if (session) {
             setSessionReady(true);
           } else {
-            setError('No invite token found. Please click the link in your invitation email to set your password.');
+            setError('No reset token found. Please click the link in your email to reset your password.');
           }
           setInitializing(false);
         }
       } catch (err) {
         console.error('Auth session error:', err);
-        setError('Something went wrong verifying your invite. Please try again or request a new invitation.');
+        setError('Something went wrong verifying your reset link. Please try again.');
         setInitializing(false);
       }
     };
@@ -111,30 +112,31 @@ export default function SetPassword() {
 
       setSuccess(true);
 
-      // 3. Sign out and redirect to doctor login
+      // 3. Sign out and redirect to appropriate login
       setTimeout(() => {
         supabase.auth.signOut().then(() => {
-          navigate('/login/doctor');
+          // We can guess where to send them based on user role if needed, but for now just send to main login
+          navigate('/login');
         });
       }, 2500);
     } catch (err) {
-      console.error('Set password error:', err);
+      console.error('Reset password error:', err);
       if (err.message?.includes('expired') || err.message?.includes('invalid')) {
-        setError('Your session has expired. Please ask your admin to resend the invitation.');
+        setError('Your session has expired. Please request a new reset link.');
       } else {
-        setError(err.message || 'Failed to set password');
+        setError(err.message || 'Failed to reset password');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── Loading state while processing the invite token ───
+  // ─── Loading state while processing the token ───
   if (initializing) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-12 px-4">
         <div className="w-12 h-12 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin mb-4" />
-        <p className="text-slate-600 text-sm">Verifying your invitation...</p>
+        <p className="text-slate-600 text-sm">Verifying your reset link...</p>
       </div>
     );
   }
@@ -149,8 +151,8 @@ export default function SetPassword() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Password Set Successfully!</h2>
-          <p className="text-slate-600">Redirecting to doctor login...</p>
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Password Reset Successfully!</h2>
+          <p className="text-slate-600">Redirecting to login...</p>
         </div>
       </div>
     );
@@ -161,10 +163,10 @@ export default function SetPassword() {
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900">
-          Set Your Password
+          Reset Your Password
         </h2>
         <p className="mt-2 text-center text-sm text-slate-600">
-          Welcome, Doctor! Please set a password for your account.
+          Please enter your new password below.
         </p>
       </div>
 
@@ -182,7 +184,6 @@ export default function SetPassword() {
                 <label className="block text-sm font-medium text-slate-700">New Password</label>
                 <div className="mt-1">
                   <input
-                    id="set-password-new"
                     type="password"
                     required
                     minLength={6}
@@ -198,7 +199,6 @@ export default function SetPassword() {
                 <label className="block text-sm font-medium text-slate-700">Confirm Password</label>
                 <div className="mt-1">
                   <input
-                    id="set-password-confirm"
                     type="password"
                     required
                     minLength={6}
@@ -212,14 +212,13 @@ export default function SetPassword() {
 
               <div>
                 <button
-                  id="set-password-submit"
                   type="submit"
                   disabled={loading}
                   className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 ${
                     loading ? 'opacity-70 cursor-not-allowed' : ''
                   }`}
                 >
-                  {loading ? 'Setting Password...' : 'Set Password'}
+                  {loading ? 'Resetting Password...' : 'Reset Password'}
                 </button>
               </div>
             </form>

@@ -3,13 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sparkles, ArrowRight, ShieldCheck, ArrowLeft, Loader2, Stethoscope, EyeOff, Eye } from 'lucide-react';
 import Logo from '../components/Logo';
+import { apiFetch } from '../utils/api';
+import { supabase } from '../utils/supabase';
 
 export default function DoctorLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
 
   const { doctorLogin, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -37,6 +41,37 @@ export default function DoctorLoginPage() {
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setError('');
+    setSuccessMsg('');
+    setLoading(true);
+
+    try {
+      const data = await apiFetch('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+
+      if (!data.success) {
+        console.error('EMAIL FAILED');
+        setError(data.message || 'Failed to send reset link');
+      } else {
+        console.log('EMAIL SENT SUCCESS');
+        setSuccessMsg(data.message || 'Check your inbox or spam folder');
+      }
+    } catch (err) {
+      console.error('EMAIL FAILED', err);
+      setError(err.message || 'Failed to send reset link.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-white">
       <div className="grid lg:grid-cols-2 min-h-screen">
@@ -57,40 +92,54 @@ export default function DoctorLoginPage() {
             </div>
 
             {error && <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">{error}</div>}
+            {successMsg && <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm font-medium animate-fade-in-up">{successMsg}</div>}
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={forgotPasswordMode ? handleForgotPassword : handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">Email Address</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                   placeholder="doctor@clinic.com" required autoFocus
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300" />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">Password</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300 pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+              
+              {!forgotPasswordMode && (
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider">Password</label>
+                    <button type="button" onClick={() => { setForgotPasswordMode(true); setError(''); setSuccessMsg(''); }} className="text-xs font-medium text-emerald-600 hover:text-emerald-700">Forgot Password?</button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300 pr-12"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+              
               <button type="submit" disabled={loading}
                 className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold hover:bg-emerald-700 transition-all duration-300 hover:shadow-lg hover:shadow-emerald-600/25 disabled:opacity-60 disabled:cursor-not-allowed group mt-2">
-                {loading ? (<><Loader2 className="w-5 h-5 animate-spin" /> Authenticating...</>)
-                  : (<><ShieldCheck className="w-4 h-4" /> Access Portal</>)}
+                {loading ? (<><Loader2 className="w-5 h-5 animate-spin" /> {forgotPasswordMode ? 'Sending...' : 'Authenticating...'}</>)
+                  : forgotPasswordMode ? 'Send Reset Link' : (<><ShieldCheck className="w-4 h-4" /> Access Portal</>)}
               </button>
             </form>
+
+            {forgotPasswordMode && (
+              <p className="text-center mt-6 text-sm text-gray-500">
+                Remembered your password? <button onClick={() => { setForgotPasswordMode(false); setError(''); setSuccessMsg(''); }} className="text-emerald-600 font-medium hover:underline">Log in</button>
+              </p>
+            )}
 
             <p className="text-center mt-8 text-sm text-gray-400">
               <Link to="/" className="hover:text-primary transition-colors flex items-center justify-center gap-1.5">

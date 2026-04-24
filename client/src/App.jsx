@@ -20,6 +20,7 @@ import PatientLoginPage from './pages/PatientLoginPage';
 import DoctorLoginPage from './pages/DoctorLoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
 import SetPassword from './pages/SetPassword';
+import ResetPassword from './pages/ResetPassword';
 
 // Protected User Pages
 import UserDashboard from './pages/UserDashboard';
@@ -62,6 +63,7 @@ function App() {
           <Route path="/login/doctor" element={<DoctorLoginPage />} />
           <Route path="/login/admin" element={<AdminLoginPage />} />
           <Route path="/set-password" element={<SetPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           {/* User dashboard (protected, no Navbar/Footer — has its own header) */}
           <Route

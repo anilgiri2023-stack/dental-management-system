@@ -23,6 +23,8 @@ import {
   Loader2,
   Search,
   X,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react';
 
 const STATUS_CONFIG = {
@@ -70,11 +72,19 @@ export default function AdminDashboard() {
   const [deletingId, setDeletingId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   
+  // User delete state
+  const [deletingUserId, setDeletingUserId] = useState(null);
+  const [showDeleteUserConfirm, setShowDeleteUserConfirm] = useState(null);
+
   // Invite Doctor State
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
+
+  // Analytics State
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   const { adminLogout, authFetch } = useAuth();
   const navigate = useNavigate();
@@ -109,11 +119,27 @@ export default function AdminDashboard() {
     }
   };
 
+  // Fetch analytics
+  const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const data = await authFetch('/admin/analytics');
+      setAnalytics(data.analytics);
+    } catch (err) {
+      console.error('Fetch analytics error:', err);
+      setError(err.message || 'Failed to fetch analytics');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'appointments') {
       fetchAppointments();
-    } else {
+    } else if (activeTab === 'users') {
       fetchUsers();
+    } else if (activeTab === 'analytics') {
+      fetchAnalytics();
     }
   }, [activeTab]);
 
@@ -210,6 +236,35 @@ export default function AdminDashboard() {
     }
   };
 
+  // Delete user (from users table + Supabase Auth)
+  const handleDeleteUser = async (userId) => {
+    try {
+      setDeletingUserId(userId);
+      setError('');
+      setSuccessMsg('');
+      
+      const data = await authFetch(`/admin/delete-user/${userId}`, { 
+        method: 'DELETE' 
+      });
+
+      if (data.success) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        setShowDeleteUserConfirm(null);
+        setSuccessMsg('User deleted successfully');
+        setTimeout(() => setSuccessMsg(''), 4000);
+      } else {
+        setError(data.message || 'Failed to delete user');
+        setShowDeleteUserConfirm(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to delete user');
+      setShowDeleteUserConfirm(null);
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   const handleLogout = () => {
     adminLogout();
     navigate('/admin-login');
@@ -268,6 +323,17 @@ export default function AdminDashboard() {
           >
             <Stethoscope className="w-4 h-4" />
             Appointments
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'analytics'
+                ? 'bg-primary text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            Analytics
           </button>
           <button
             onClick={() => setActiveTab('users')}
@@ -587,7 +653,7 @@ export default function AdminDashboard() {
               </div>
             )}
           </>
-        ) : (
+        ) : activeTab === 'users' ? (
           /* ═══ USERS TAB ═══ */
           <>
             <div className="flex items-center justify-between gap-4 mb-6">
@@ -636,6 +702,15 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+            {/* Success Message */}
+            {successMsg && (
+              <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm font-medium animate-fade-in-up flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                {successMsg}
+                <button onClick={() => setSuccessMsg('')} className="ml-auto text-green-400 hover:text-green-600">✕</button>
+              </div>
+            )}
+
             {/* Error */}
             {error && (
               <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">
@@ -675,13 +750,16 @@ export default function AdminDashboard() {
                         <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                           ID
                         </th>
+                        <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {users
                         .filter(u => userRoleFilter === 'doctor' ? u.role === 'doctor' : (u.role === 'user' || u.role === 'patient'))
                         .map((u) => (
-                        <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
+                        <tr key={u.id} className="hover:bg-gray-50/50 transition-colors group">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
@@ -711,8 +789,35 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-6 py-4">
                             <span className="text-xs text-gray-400 font-mono">
-                              {u.id?.slice(0, 8)}...
+                              {u.id?.slice(0, 6)}...
                             </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {showDeleteUserConfirm === u.id ? (
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  onClick={() => handleDeleteUser(u.id)}
+                                  disabled={deletingUserId === u.id}
+                                  className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                  {deletingUserId === u.id ? 'Deleting...' : 'Confirm'}
+                                </button>
+                                <button
+                                  onClick={() => setShowDeleteUserConfirm(null)}
+                                  className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShowDeleteUserConfirm(u.id)}
+                                className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                                title="Delete user"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -722,7 +827,118 @@ export default function AdminDashboard() {
               </div>
             )}
           </>
-        )}
+        ) : activeTab === 'analytics' ? (
+          /* ═══ ANALYTICS TAB ═══ */
+          <>
+            {analyticsLoading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+                <p className="text-gray-500 text-sm">Loading analytics...</p>
+              </div>
+            ) : analytics ? (
+              <div className="space-y-8">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Total Patients', value: analytics.totalPatients, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                    { label: 'Total Doctors', value: analytics.totalDoctors, icon: Stethoscope, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    { label: 'Total Appointments', value: analytics.totalAppointments, icon: Calendar, color: 'text-primary', bg: 'bg-primary-50' },
+                    { label: 'Approved', value: analytics.statusBreakdown?.Approved || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
+                  ].map((stat) => (
+                    <div key={stat.label} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className={`w-10 h-10 ${stat.bg} rounded-xl flex items-center justify-center`}>
+                          <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                        </div>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                      <p className="text-xs text-gray-500 mt-1">{stat.label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Monthly Bookings Chart */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-primary" /> Monthly Bookings
+                  </h3>
+                  <div className="flex items-end gap-2 h-48">
+                    {Object.entries(analytics.monthlyBookings || {}).map(([month, count]) => {
+                      const maxVal = Math.max(...Object.values(analytics.monthlyBookings || {}), 1);
+                      const height = Math.max((count / maxVal) * 100, 4);
+                      return (
+                        <div key={month} className="flex-1 flex flex-col items-center gap-1">
+                          <span className="text-xs font-semibold text-gray-700">{count}</span>
+                          <div className="w-full bg-primary/80 rounded-t-lg transition-all hover:bg-primary" style={{ height: `${height}%` }} />
+                          <span className="text-[10px] text-gray-400">{month.slice(5)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Popular Services + Status */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                      <BarChart3 className="w-5 h-5 text-primary" /> Popular Services
+                    </h3>
+                    <div className="space-y-3">
+                      {(analytics.popularServices || []).map((s, i) => {
+                        const maxC = analytics.popularServices[0]?.count || 1;
+                        return (
+                          <div key={s.service} className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-gray-400 w-4">{i + 1}</span>
+                            <div className="flex-1">
+                              <div className="flex justify-between mb-1">
+                                <span className="text-sm font-medium text-gray-700 capitalize">{s.service}</span>
+                                <span className="text-sm font-bold text-gray-900">{s.count}</span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(s.count / maxC) * 100}%` }} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(analytics.popularServices || []).length === 0 && (
+                        <p className="text-sm text-gray-400">No data yet</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-primary" /> Status Breakdown
+                    </h3>
+                    <div className="space-y-4">
+                      {Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => {
+                        const colors = { Pending: 'bg-amber-400', Approved: 'bg-emerald-400', Rejected: 'bg-red-400' };
+                        const total = analytics.totalAppointments || 1;
+                        return (
+                          <div key={status}>
+                            <div className="flex justify-between mb-1">
+                              <span className="text-sm font-medium text-gray-700">{status}</span>
+                              <span className="text-sm font-bold text-gray-900">{count} ({Math.round((count / total) * 100)}%)</span>
+                            </div>
+                            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-full ${colors[status] || 'bg-gray-400'} rounded-full`} style={{ width: `${(count / total) * 100}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-20">
+                <p className="text-gray-500">No analytics data available</p>
+              </div>
+            )}
+          </>
+        ) : null}
+
 
         {/* Invite Doctor Modal */}
         {showInviteModal && (

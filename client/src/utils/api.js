@@ -16,7 +16,6 @@ export const apiFetch = async (endpoint, options = {}) => {
   try {
     res = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
   } catch (err) {
-    // Catch network errors (like "Failed to fetch")
     console.error('API Fetch Network Error:', err);
     throw new Error('Unable to connect to the server. Please try again later.');
   }
@@ -31,6 +30,42 @@ export const apiFetch = async (endpoint, options = {}) => {
 
   if (!res.ok) {
     throw new Error(data.message || 'Request failed');
+  }
+
+  return data;
+};
+
+// Upload helper for multipart/form-data (file uploads)
+export const uploadFetch = async (endpoint, formData) => {
+  const token = localStorage.getItem('cs_token');
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  // Do NOT set Content-Type — browser sets multipart boundary automatically
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+  } catch (err) {
+    console.error('Upload Network Error:', err);
+    throw new Error('Unable to connect to the server. Please try again later.');
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    console.error('Upload JSON Parse Error:', err);
+    throw new Error('Received an invalid response from the server.');
+  }
+
+  if (!res.ok) {
+    throw new Error(data.message || 'Upload failed');
   }
 
   return data;
