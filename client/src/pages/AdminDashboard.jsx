@@ -512,6 +512,9 @@ export default function AdminDashboard() {
                         <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                           Patient
                         </th>
+                        <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                          Doctor
+                        </th>
                         <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
                           Service
                         </th>
@@ -561,6 +564,13 @@ export default function AdminDashboard() {
                                   </div>
                                 </div>
                               </div>
+                            </td>
+
+                            {/* Doctor */}
+                            <td className="px-6 py-4 hidden sm:table-cell">
+                              <span className="text-sm font-medium text-gray-700">
+                                {apt.doctor_name && apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'N/A'}
+                              </span>
                             </td>
 
                             {/* Service */}
@@ -652,6 +662,40 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+            
+            {/* Upcoming Appointments List with Doctor */}
+            {(() => {
+              const todayDateStr = new Date().toISOString().split('T')[0];
+              const upcomingList = appointments
+                .filter(a => a.status === 'Approved' && a.date >= todayDateStr)
+                .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`) - new Date(`${b.date}T${b.time || '00:00'}`));
+
+              if (upcomingList.length === 0) return null;
+
+              return (
+                <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="p-5 border-b border-gray-100 flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-primary" />
+                    <h3 className="text-lg font-bold text-gray-900">Upcoming Appointments with Doctor</h3>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {upcomingList.map((apt) => (
+                      <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-gray-50/50 transition-colors">
+                        <div className="text-sm text-gray-700">
+                          <span className="font-semibold text-gray-900">{apt.name}</span>
+                          <span className="mx-2 text-gray-300">→</span>
+                          <span className="font-medium text-emerald-600">{apt.doctor_name && apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'N/A'}</span>
+                        </div>
+                        <div className="text-sm text-gray-500 flex items-center gap-1.5 shrink-0">
+                          {new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {apt.time && <> &bull; {new Date(`2000-01-01T${apt.time}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         ) : activeTab === 'users' ? (
           /* ═══ USERS TAB ═══ */

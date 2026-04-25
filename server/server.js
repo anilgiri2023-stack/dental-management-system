@@ -13,6 +13,7 @@ const fs = require('fs');
 const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
+const { sendEmail } = require('./services/emailService');
 
 dotenv.config();
 
@@ -97,13 +98,13 @@ function patientOnly(req, res, next) {
 // ─── Multer (memory storage for Supabase upload) ────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
   fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF, JPG, PNG, and WebP files are allowed'));
+      cb(new Error(`File type "${file.mimetype}" is not allowed. Only PDF, JPG, and PNG files are accepted.`));
     }
   },
 });
@@ -285,7 +286,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     }
     const { data } = await supabase.from('users').select('*').eq('id', req.user.id).single();
     if (data) {
-      return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, phone: data.phone, role: data.role } });
+      return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, phone: data.phone, role: data.role, avatar_url: data.avatar_url || null } });
     }
     res.json({ success: true, user: req.user });
   } catch {
@@ -369,7 +370,7 @@ app.post('/api/doctor/login', async (req, res) => {
       success: true,
       message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: 'doctor' },
+      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: 'doctor', avatar_url: user.avatar_url || null },
     });
   } catch (err) {
     console.error('Doctor login error:', err);
@@ -430,6 +431,14 @@ async function bookAppointment(req, res) {
       return res.status(500).json({ success: false, message: error.message });
     }
 
+    // ─── Email Logic ───
+    if (email) {
+      const subject = 'Appointment Booked Successfully';
+      const message = `Dear ${name},\n\nYour appointment for ${service} has been successfully booked for ${new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${time}.\n\nWe will notify you once the doctor reviews and approves it.\n\nThank you,\nClinical Serenity`;
+      // Send email without blocking the response
+      sendEmail(email, subject, message);
+    }
+
     console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${userId}]`);
     res.status(201).json({ success: true, message: 'Appointment booked', appointment: data });
   } catch (error) {
@@ -464,25 +473,30 @@ async function getMyAppointments(req, res) {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Enrich appointments with user email for admin and doctor view
+    // Enrich appointments with user details for admin and doctor view
     let enriched = data || [];
     if ((req.user.role === 'admin' || req.user.role === 'doctor') && enriched.length > 0) {
       // Get unique user IDs
-      const userIds = [...new Set(enriched.map(a => a.user_id))];
+      const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
+      
       const { data: usersData } = await supabase
         .from('users')
-        .select('id, email')
+        .select('id, email, name, phone')
         .in('id', userIds);
 
       const userMap = {};
       (usersData || []).forEach(u => { userMap[u.id] = u; });
 
-      enriched = enriched.map(apt => ({
-        ...apt,
-        // Use apt.name from appointments table, fallback to user map, then 'Patient'
-        name: apt.name || userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
-        email: apt.email || userMap[apt.user_id]?.email || '',
-      }));
+      enriched = enriched.map(apt => {
+        const dbUser = userMap[apt.user_id] || {};
+        return {
+          ...apt,
+          // Prioritize data in appointments table (set during booking), fallback to users table
+          name: apt.name || dbUser.name || 'Patient',
+          email: apt.email || dbUser.email || '',
+          phone: apt.phone || dbUser.phone || '',
+        };
+      });
     }
 
     res.json({ success: true, appointments: enriched });
@@ -511,16 +525,25 @@ app.get('/all-appointments', authMiddleware, adminOnly, async (req, res) => {
     // Enrich with user info
     let enriched = data || [];
     if (enriched.length > 0) {
-      const userIds = [...new Set(enriched.map(a => a.user_id))];
-      const { data: usersData } = await supabase.from('users').select('id, email').in('id', userIds);
+      const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
+      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
+      const allIdsToFetch = [...new Set([...userIds, ...doctorIds])];
+      
+      const { data: usersData } = await supabase.from('users').select('id, email, name, phone, role').in('id', allIdsToFetch);
       const userMap = {};
       (usersData || []).forEach(u => { userMap[u.id] = u; });
 
-      enriched = enriched.map(apt => ({
-        ...apt,
-        name: apt.name || userMap[apt.user_id]?.email?.split('@')[0] || 'Patient',
-        email: apt.email || userMap[apt.user_id]?.email || '',
-      }));
+      enriched = enriched.map(apt => {
+        const dbUser = userMap[apt.user_id] || {};
+        const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
+        return {
+          ...apt,
+          name: apt.name || dbUser.name || 'Patient',
+          email: apt.email || dbUser.email || '',
+          phone: apt.phone || dbUser.phone || '',
+          doctor_name: doctorUser ? doctorUser.name : 'N/A'
+        };
+      });
     }
 
     res.json({ success: true, appointments: enriched });
@@ -618,6 +641,118 @@ async function updateStatus(req, res) {
 app.put('/update-status', authMiddleware, adminOnly, updateStatus);
 app.patch('/api/appointments/:id/status', authMiddleware, adminOnly, updateStatus);
 app.put('/api/update-status', authMiddleware, adminOnly, updateStatus);
+
+// ═══════════════════════════════════════════════════════════
+// PATCH /api/doctor/appointments/:id/status — doctor updates own appointment
+// ═══════════════════════════════════════════════════════════
+app.patch('/api/doctor/appointments/:id/status', authMiddleware, doctorOnly, async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const { status } = req.body;
+    
+    if (!appointmentId) return res.status(400).json({ success: false, message: 'Appointment ID required' });
+    if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be Pending, Approved, or Rejected' });
+    }
+
+    // Verify the appointment belongs to this doctor
+    const { data: apt, error: fetchErr } = await supabase
+      .from('appointments').select('*').eq('id', appointmentId).single();
+    if (fetchErr || !apt) return res.status(404).json({ success: false, message: 'Appointment not found' });
+    if (apt.doctor_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your appointment' });
+
+    const { error: updateErr } = await supabase
+      .from('appointments').update({ status }).eq('id', appointmentId);
+    if (updateErr) throw updateErr;
+
+    // ─── Email Logic ───
+    const patientEmail = apt.email || apt.patient_email; // Handle potential schema variations
+    if (patientEmail && status !== 'Pending') {
+      let subject, message;
+      if (status === 'Approved') {
+        subject = 'Appointment Approved';
+        message = 'Your appointment has been approved by the doctor.';
+      } else if (status === 'Rejected') {
+        subject = 'Appointment Rejected';
+        message = 'Your appointment has been rejected. Please contact clinic.';
+      }
+      // Send email without blocking the response
+      sendEmail(patientEmail, subject, message);
+    } else {
+      console.log(`⚠️ No email sent for appointment ${appointmentId}. Status: ${status}`);
+    }
+
+    console.log(`🩺 Doctor ${req.user.id} updated appointment ${appointmentId} → ${status}`);
+    res.json({ success: true, message: `Appointment ${status}` });
+  } catch (err) {
+    console.error('Doctor status update error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update status' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// Avatar upload (images only, 2MB max)
+// ═══════════════════════════════════════════════════════════
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only JPG, PNG, and WebP images are allowed for avatars'));
+  },
+});
+
+// POST /api/avatar/upload — upload profile picture
+app.post('/api/avatar/upload', authMiddleware, avatarUpload.single('avatar'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ success: false, message: 'No image file provided' });
+
+    const userId = req.user.id;
+    const fileExt = file.originalname.split('.').pop() || 'jpg';
+    const fileName = `${Date.now()}.${fileExt}`;
+
+    console.log("Uploading to Supabase bucket: avatars");
+    console.log("File name:", fileName);
+
+    const { error: uploadErr } = await supabase.storage
+      .from('avatars')
+      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+
+    if (uploadErr) {
+      console.error('❌ Avatar storage error:', uploadErr);
+      return res.status(500).json({ success: false, message: `Avatar upload failed: ${uploadErr.message}` });
+    }
+
+    const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+    const avatar_url = urlData?.publicUrl;
+
+    // Save URL in users table
+    const { error: dbErr } = await supabase
+      .from('users').update({ avatar_url }).eq('id', userId);
+    if (dbErr) {
+      console.error('❌ Avatar DB update error:', dbErr);
+      return res.status(500).json({ success: false, message: `Avatar saved but DB update failed: ${dbErr.message}` });
+    }
+
+    console.log(`✅ Avatar updated for ${userId}: ${avatar_url}`);
+    res.json({ success: true, avatar_url });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/avatar — get current user's avatar
+app.get('/api/avatar', authMiddleware, async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('users').select('avatar_url').eq('id', req.user.id).single();
+    res.json({ success: true, avatar_url: data?.avatar_url || null });
+  } catch {
+    res.json({ success: true, avatar_url: null });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
 // DELETE /api/appointments/:id — admin only
@@ -744,19 +879,42 @@ app.delete('/api/admin/delete-user/:id', authMiddleware, adminOnly, async (req, 
     const { id } = req.params;
     console.log(`🗑️ Admin deleting user: ${id}`);
 
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'User ID is required' });
+    }
+
+    // Protection: Don't allow deleting the admin user (checking by role)
+    const { data: targetUser, error: fetchErr } = await supabase
+      .from('users')
+      .select('role, email')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (targetUser.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Cannot delete an admin user' });
+    }
+
     // 1. Delete associated reports
     const { error: reportsErr } = await supabase.from('reports').delete().eq('patient_id', id);
     if (reportsErr) console.warn('Reports cleanup warning:', reportsErr.message);
 
-    // 2. Delete from users table (appointments cascade via FK)
+    // 2. Delete associated appointments
+    const { error: aptsErr } = await supabase.from('appointments').delete().eq('user_id', id);
+    if (aptsErr) console.warn('Appointments cleanup warning:', aptsErr.message);
+
+    // 3. Delete from users table
     const { error: dbError } = await supabase.from('users').delete().eq('id', id);
     if (dbError) {
       console.error('❌ Delete user DB error:', dbError);
-      return res.status(500).json({ success: false, message: dbError.message });
+      return res.status(500).json({ success: false, message: 'Database deletion failed: ' + dbError.message });
     }
     console.log(`✅ User ${id} deleted from users table`);
 
-    // 3. Delete from Supabase Auth (may not exist for OTP-only users)
+    // 4. Delete from Supabase Auth (may not exist for OTP-only users)
     const { error: authErr } = await supabase.auth.admin.deleteUser(id);
     if (authErr) {
       console.warn(`⚠️ Auth delete skipped for ${id}: ${authErr.message}`);
@@ -767,7 +925,7 @@ app.delete('/api/admin/delete-user/:id', authMiddleware, adminOnly, async (req, 
     return res.status(200).json({ success: true, message: 'User deleted successfully' });
   } catch (err) {
     console.error('❌ Delete user error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(500).json({ success: false, message: 'Server error: ' + (err.message || 'Unknown error') });
   }
 });
 
@@ -847,47 +1005,72 @@ app.post('/api/auth/reset-password', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    // Generate password reset link via Supabase
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: 'recovery',
-      email: email.trim().toLowerCase(),
-      options: { redirectTo: 'http://localhost:5173/reset-password' }
+    console.log(`🔐 Password reset requested for: ${email}`);
+
+    // Use Supabase built-in reset password functionality as requested
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: 'http://localhost:5173/reset-password',
     });
 
-    if (linkError) {
-      console.error('GENERATE LINK FAILED — Reset password:', linkError);
-      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate reset link' });
+    if (error) {
+      console.error('❌ Supabase resetPasswordForEmail failed:', error.message);
+      return res.status(500).json({ success: false, message: error.message });
     }
 
-    const actionLink = linkData.properties?.action_link;
-
-    // Send via Nodemailer
-    try {
-      await transporter.sendMail({
-        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-        to: email.trim().toLowerCase(),
-        subject: 'Password Reset — Clinical Serenity',
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
-            <p style="color:#475569;font-size:15px">You requested a password reset.</p>
-            <div style="text-align:center;margin:30px 0;">
-              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Reset Password</a>
-            </div>
-            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
-            <p style="color:#94a3b8;font-size:13px">If you didn't request this, ignore this email.</p>
-          </div>
-        `
-      });
-      console.log('EMAIL SENT SUCCESS — Reset password for:', email);
-      res.json({ success: true, message: 'Password reset email sent to ' + email });
-    } catch (emailErr) {
-      console.error('EMAIL FAILED — Reset password email error:', emailErr);
-      res.status(500).json({ success: false, message: 'Failed to send reset email' });
-    }
+    console.log(`✅ Supabase reset email triggered for: ${email}`);
+    res.json({ success: true, message: 'Password reset email has been sent by Supabase to ' + email });
   } catch (err) {
-    console.error('SERVER ERROR — Reset password:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('❌ SERVER ERROR — Reset password:', err);
+    res.status(500).json({ success: false, message: 'Server error: ' + (err.message || 'Unknown error') });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/auth/complete-reset-password — finalize password reset
+// ═══════════════════════════════════════════════════════════
+app.post('/api/auth/complete-reset-password', async (req, res) => {
+  try {
+    const { password, access_token } = req.body;
+    if (!password || !access_token) {
+      return res.status(400).json({ success: false, message: 'Password and token are required' });
+    }
+
+    // 1. Get user from Supabase using the access token
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(access_token);
+    if (authErr || !user) {
+      console.error('❌ Reset password — Invalid token:', authErr?.message);
+      return res.status(401).json({ success: false, message: 'Invalid or expired session. Please request a new link.' });
+    }
+
+    console.log(`🔐 Completing password reset for: ${user.email}`);
+
+    // 2. Update password in Supabase Auth (using service role to ensure success)
+    const { error: updateAuthErr } = await supabase.auth.admin.updateUserById(user.id, {
+      password: password
+    });
+
+    if (updateAuthErr) {
+      console.error('❌ Reset password — Supabase Auth update failed:', updateAuthErr.message);
+      return res.status(500).json({ success: false, message: 'Failed to update Auth password: ' + updateAuthErr.message });
+    }
+
+    // 3. Update password in our public.users table
+    const { error: updateDbErr } = await supabase
+      .from('users')
+      .update({ password: password })
+      .eq('id', user.id);
+
+    if (updateDbErr) {
+      console.error('❌ Reset password — public.users update failed:', updateDbErr.message);
+      // We don't fail the whole request here as the Auth password is already updated, 
+      // but it's good to log it.
+    }
+
+    console.log(`✅ Password reset complete for: ${user.email}`);
+    res.json({ success: true, message: 'Your password has been reset successfully.' });
+  } catch (err) {
+    console.error('❌ SERVER ERROR — Complete reset password:', err);
+    res.status(500).json({ success: false, message: 'Server error during password reset' });
   }
 });
 
@@ -962,18 +1145,63 @@ app.get('/api/admin/analytics', authMiddleware, adminOnly, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file'), async (req, res) => {
   try {
-    const { patient_id, notes } = req.body;
+    const { patient_id, appointment_id, title } = req.body;
     const file = req.file;
+    const doctor_id = req.user.id;
 
+    // ─── Debug: log everything received ───
+    console.log('═══════════════════════════════════════');
+    console.log('📤 UPLOAD-REPORT — Request received');
+    console.log('  doctor_id (from JWT):', doctor_id);
+    console.log('  patient_id:', patient_id);
+    console.log('  appointment_id:', appointment_id);
+    console.log('  title:', title);
+    console.log('  file:', file ? { name: file.originalname, size: file.size, type: file.mimetype } : 'NONE');
+    console.log('═══════════════════════════════════════');
+
+    // ─── Validation ───
     if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     if (!patient_id) return res.status(400).json({ success: false, message: 'Patient ID is required' });
+    if (!doctor_id) return res.status(400).json({ success: false, message: 'Doctor ID is missing from session. Please re-login.' });
 
-    // Upload to Supabase Storage
+    // ─── Validate FK references exist before insert ───
+    // 1. Check doctor exists in users table
+    const { data: doctorRow, error: doctorErr } = await supabase
+      .from('users').select('id, role').eq('id', doctor_id).single();
+    if (doctorErr || !doctorRow) {
+      console.error('❌ doctor_id NOT FOUND in users table:', doctor_id, doctorErr);
+      return res.status(400).json({ success: false, message: `Doctor ID "${doctor_id}" not found in users table. Your session may be stale — please log out and log back in.` });
+    }
+    console.log('✅ Doctor verified in users table:', doctorRow);
+
+    // 2. Check patient exists in users table
+    const { data: patientRow, error: patientErr } = await supabase
+      .from('users').select('id, name, email').eq('id', patient_id).single();
+    if (patientErr || !patientRow) {
+      console.error('❌ patient_id NOT FOUND in users table:', patient_id, patientErr);
+      return res.status(400).json({ success: false, message: `Patient ID "${patient_id}" not found in users table.` });
+    }
+    console.log('✅ Patient verified in users table:', patientRow);
+
+    // 3. Check appointment exists (if provided)
+    if (appointment_id) {
+      const { data: aptRow, error: aptErr } = await supabase
+        .from('appointments').select('id').eq('id', appointment_id).single();
+      if (aptErr || !aptRow) {
+        console.error('❌ appointment_id NOT FOUND in appointments table:', appointment_id, aptErr);
+        return res.status(400).json({ success: false, message: `Appointment ID "${appointment_id}" not found in appointments table.` });
+      }
+      console.log('✅ Appointment verified in appointments table:', aptRow);
+    }
+
+    // ─── Upload to Supabase Storage ───
     const ext = path.extname(file.originalname);
     const fileName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
-    const filePath = `reports/${patient_id}/${fileName}`;
+    const filePath = `${patient_id}/${fileName}`;
 
-    const { error: uploadErr } = await supabase.storage
+    console.log('📤 Uploading to Supabase Storage:', { bucket: 'reports', path: filePath });
+
+    const { data: uploadData, error: uploadErr } = await supabase.storage
       .from('reports')
       .upload(filePath, file.buffer, {
         contentType: file.mimetype,
@@ -981,38 +1209,274 @@ app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file')
       });
 
     if (uploadErr) {
-      console.error('Storage upload error:', uploadErr);
-      return res.status(500).json({ success: false, message: 'Failed to upload file: ' + uploadErr.message });
+      console.error('❌ Supabase Storage upload error:', uploadErr);
+      return res.status(500).json({ success: false, message: `Storage upload failed: ${uploadErr.message}` });
     }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage.from('reports').getPublicUrl(filePath);
-    const fileUrl = urlData?.publicUrl;
+    console.log('✅ File uploaded to storage:', uploadData);
 
-    // Save record in DB
+    // ─── Get public URL ───
+    const { data: urlData } = supabase.storage.from('reports').getPublicUrl(filePath);
+    const file_url = urlData?.publicUrl;
+    console.log('🔗 Public URL:', file_url);
+
+    if (!file_url) {
+      return res.status(500).json({ success: false, message: 'File uploaded but failed to generate public URL.' });
+    }
+
+    const insertPayload = {
+      patient_id,
+      doctor_id,
+      appointment_id: appointment_id || null,
+      title: title || 'Medical Report',
+      file_url,
+    };
+
+    console.log('📝 INSERT PAYLOAD for reports table:', JSON.stringify(insertPayload, null, 2));
+
+    // ─── Insert into DB ───
     const { data: report, error: dbErr } = await supabase
       .from('reports')
-      .insert([{
-        patient_id,
-        doctor_id: req.user.id,
-        file_url: fileUrl,
-        file_name: file.originalname,
-        file_type: file.mimetype,
-        notes: notes || '',
-      }])
+      .insert([insertPayload])
       .select()
       .single();
 
     if (dbErr) {
-      console.error('Report DB insert error:', dbErr);
-      return res.status(500).json({ success: false, message: 'File uploaded but failed to save record' });
+      console.error('❌ REPORT DB INSERT ERROR:', {
+        message: dbErr.message,
+        details: dbErr.details,
+        hint: dbErr.hint,
+        code: dbErr.code,
+      });
+      return res.status(500).json({
+        success: false,
+        message: `DB insert failed: ${dbErr.message}${dbErr.details ? ' — ' + dbErr.details : ''}${dbErr.hint ? ' (Hint: ' + dbErr.hint + ')' : ''}`,
+      });
     }
 
-    console.log(`📄 Report uploaded by Dr. ${req.user.name} for patient ${patient_id}`);
-    res.status(201).json({ success: true, message: 'Report uploaded', report });
+    console.log(`✅ Report record created: ${report.id}, URL: ${file_url}`);
+    res.status(201).json({ success: true, message: 'Report uploaded successfully', report });
   } catch (err) {
-    console.error('Upload report error:', err);
-    res.status(500).json({ success: false, message: err.message || 'Failed to upload report' });
+    console.error('❌ Upload report error:', err);
+    res.status(500).json({ success: false, message: `Upload error: ${err.message}` });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/edit-report — doctor edits existing report (with optional new file)
+// ═══════════════════════════════════════════════════════════
+app.post('/api/edit-report', authMiddleware, doctorOnly, upload.single('file'), async (req, res) => {
+  try {
+    const { report_id, patient_id, title } = req.body;
+    const file = req.file;
+
+    if (!report_id) {
+      return res.status(400).json({ success: false, message: 'Report ID is required' });
+    }
+
+    console.log(`✏️ Editing report: ${report_id}`, { hasFile: !!file, title });
+    if (file) {
+      console.log('📎 New file info:', { name: file.originalname, size: file.size, type: file.mimetype });
+    }
+
+    // Get existing report
+    const { data: existing, error: fetchErr } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('id', report_id)
+      .single();
+
+    if (fetchErr || !existing) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+
+    // Check ownership
+    if (existing.doctor_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not authorized to edit this report' });
+    }
+
+    let file_url = existing.file_url;
+
+    // Upload new file if provided
+    if (file) {
+      const ownerPatientId = patient_id || existing.patient_id;
+      const ext = path.extname(file.originalname);
+      const storageFileName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
+      const filePath = `${ownerPatientId}/${storageFileName}`;
+
+      console.log('📤 Uploading replacement file to:', { bucket: 'reports', path: filePath });
+
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('reports')
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        console.error('❌ Edit storage upload error:', uploadErr);
+        return res.status(500).json({ success: false, message: `Storage upload failed: ${uploadErr.message}` });
+      }
+
+      console.log('✅ Replacement file uploaded:', uploadData);
+
+      const { data: urlData } = supabase.storage.from('reports').getPublicUrl(filePath);
+      file_url = urlData?.publicUrl;
+      console.log('🔗 New public URL:', file_url);
+    }
+
+    // Update record
+    const { data: updated, error: updateErr } = await supabase
+      .from('reports')
+      .update({
+        file_url,
+        title: title || existing.title,
+      })
+      .eq('id', report_id)
+      .select()
+      .single();
+
+    if (updateErr) {
+      console.error('❌ Report update error:', updateErr);
+      return res.status(500).json({ success: false, message: `Report update failed: ${updateErr.message}` });
+    }
+
+    console.log(`✅ Report ${report_id} updated successfully`);
+    res.json({ success: true, message: 'Report updated successfully', report: updated });
+  } catch (err) {
+    console.error('❌ Edit report error:', err);
+    res.status(500).json({ success: false, message: `Edit error: ${err.message}` });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// PUT /api/reports/:id — doctor updates report title only
+// ═══════════════════════════════════════════════════════════
+app.put('/api/reports/:id', authMiddleware, doctorOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title } = req.body;
+    const doctorId = req.user.id;
+
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Report ID is required' });
+    }
+
+    // Check ownership
+    const { data: existing, error: fetchErr } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !existing) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+
+    if (existing.doctor_id !== doctorId) {
+      return res.status(403).json({ success: false, message: 'Not authorized to update this report' });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('reports')
+      .update({ title: title || existing.title })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr) {
+      console.error('❌ Report title update error:', updateErr);
+      return res.status(500).json({ success: false, message: 'Failed to update report title' });
+    }
+
+    console.log(`✅ Report ${id} title updated`);
+    res.json({ success: true, message: 'Report updated successfully', report: updated });
+  } catch (err) {
+    console.error('❌ Update report error:', err);
+    res.status(500).json({ success: false, message: 'Server error during report update' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// DELETE /api/reports/:id — doctor deletes their own report
+// ═══════════════════════════════════════════════════════════
+app.delete('/api/reports/:id', authMiddleware, doctorOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doctorId = req.user.id;
+
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Report ID is required' });
+    }
+
+    console.log(`🗑️ Doctor ${doctorId} deleting report: ${id}`);
+
+    // First get the report to check ownership and get file_url
+    const { data: report, error: fetchErr } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !report) {
+      return res.status(404).json({ success: false, message: 'Report not found' });
+    }
+
+    // Check ownership
+    if (report.doctor_id !== doctorId) {
+      return res.status(403).json({ success: false, message: 'Not authorized to delete this report' });
+    }
+
+    // Delete from database
+    const { error: deleteErr } = await supabase
+      .from('reports')
+      .delete()
+      .eq('id', id);
+
+    if (deleteErr) {
+      console.error('❌ Report delete error:', deleteErr);
+      return res.status(500).json({ success: false, message: 'Failed to delete report' });
+    }
+
+    console.log(`✅ Report ${id} deleted successfully`);
+    res.json({ success: true, message: 'Report deleted successfully' });
+  } catch (err) {
+    console.error('❌ Delete report error:', err);
+    res.status(500).json({ success: false, message: 'Server error during report deletion' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/doctor/reports — doctor views their uploaded reports
+// ═══════════════════════════════════════════════════════════
+app.get('/api/doctor/reports', authMiddleware, doctorOnly, async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .eq('doctor_id', doctorId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Ensure full URLs for files
+    let enriched = data || [];
+    if (enriched.length > 0) {
+      enriched = enriched.map(r => {
+        if (r.file_url && !r.file_url.startsWith('http')) {
+          const { data: urlData } = supabase.storage.from('reports').getPublicUrl(r.file_url);
+          return { ...r, file_url: urlData?.publicUrl };
+        }
+        return r;
+      });
+    }
+
+    console.log(`📋 Doctor ${doctorId} fetched ${enriched.length} reports`);
+    res.json({ success: true, reports: enriched });
+  } catch (err) {
+    console.error('❌ Doctor reports fetch error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch reports' });
   }
 });
 
@@ -1030,9 +1494,19 @@ app.get('/api/patient/reports', authMiddleware, async (req, res) => {
 
     if (error) throw error;
 
-    // Enrich with doctor name
+    // Enrich with doctor name and ensure full URLs for files
     let enriched = data || [];
     if (enriched.length > 0) {
+      // 1. Handle file URLs
+      enriched = enriched.map(r => {
+        if (r.file_url && !r.file_url.startsWith('http')) {
+          const { data: urlData } = supabase.storage.from('reports').getPublicUrl(r.file_url);
+          return { ...r, file_url: urlData?.publicUrl };
+        }
+        return r;
+      });
+
+      // 2. Add doctor names
       const docIds = [...new Set(enriched.map(r => r.doctor_id).filter(Boolean))];
       if (docIds.length > 0) {
         const { data: docs } = await supabase.from('users').select('id, name').in('id', docIds);
@@ -1175,8 +1649,22 @@ app.listen(PORT, async () => {
     console.log(uErr ? `❌ users table: ${uErr.message}` : '✅ users table OK');
     const { error: aErr } = await supabase.from('appointments').select('id, name, email, phone').limit(1);
     console.log(aErr ? `❌ appointments table: ${aErr.message}` : '✅ appointments table OK');
-    const { error: rErr } = await supabase.from('reports').select('id').limit(1);
-    console.log(rErr ? `⚠️  reports table: ${rErr.message} (run migration-v2.sql)` : '✅ reports table OK');
+    // Check reports table with ALL columns used in insert
+    const { error: rErr } = await supabase.from('reports').select('id, patient_id, doctor_id, appointment_id, title, file_url').limit(1);
+    if (rErr) {
+      console.log(`⚠️  reports table: ${rErr.message}`);
+      console.log('   ↳ Run migration-v2.sql AND update-reports-schema.sql in Supabase SQL Editor');
+    } else {
+      console.log('✅ reports table OK (all columns verified)');
+    }
+    // Check storage bucket
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const reportsBucket = (buckets || []).find(b => b.name === 'reports');
+    if (reportsBucket) {
+      console.log(`✅ Storage bucket "reports" OK (public: ${reportsBucket.public})`);
+    } else {
+      console.log('⚠️  Storage bucket "reports" NOT FOUND — create it in Supabase Dashboard → Storage');
+    }
   } catch (e) {
     console.error('❌ DB check failed:', e.message);
   }
