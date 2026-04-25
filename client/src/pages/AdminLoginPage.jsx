@@ -12,6 +12,7 @@ export default function AdminLoginPage() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const { adminLogin } = useAuth();
   const navigate = useNavigate();
@@ -37,6 +38,7 @@ export default function AdminLoginPage() {
       setError('Please enter your admin email address first.');
       return;
     }
+    if (cooldown > 0) return;
     setError('');
     setSuccessMsg('');
     setLoading(true);
@@ -50,12 +52,34 @@ export default function AdminLoginPage() {
       if (data.success) {
         console.log("Reset email sent to:", email);
         setSuccessMsg(data.message || "Check your inbox or spam folder");
+        
+        // Start 60s countdown
+        setCooldown(60);
+        const interval = setInterval(() => {
+          setCooldown(prev => {
+            if (prev <= 1) {
+              clearInterval(interval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
       } else {
-        setError(data.message || 'Failed to send reset link.');
+        const msg = data.message || 'Failed to send reset link.';
+        if (msg.toLowerCase().includes('rate limit')) {
+          setError('Too many requests. Please wait a while before trying again.');
+        } else {
+          setError(msg);
+        }
       }
     } catch (err) {
       console.error(err);
-      setError(err.message || 'Failed to send reset link.');
+      const msg = err.message || 'Failed to send reset link.';
+      if (msg.toLowerCase().includes('rate limit')) {
+        setError('Too many requests. Please wait a while before trying again.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -157,7 +181,7 @@ export default function AdminLoginPage() {
             <button
               type="submit"
               id="admin-login-submit"
-              disabled={loading}
+              disabled={loading || cooldown > 0}
               className="w-full inline-flex items-center justify-center gap-2 bg-primary text-white py-3.5 rounded-xl font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-60 disabled:cursor-not-allowed group"
             >
               {loading ? (
@@ -165,6 +189,8 @@ export default function AdminLoginPage() {
                   <Loader2 className="w-5 h-5 animate-spin" />
                   {forgotPasswordMode ? 'Sending...' : 'Authenticating...'}
                 </>
+              ) : cooldown > 0 ? (
+                `Wait ${cooldown}s`
               ) : (
                 forgotPasswordMode ? 'Send Reset Link' : (
                   <>

@@ -192,7 +192,7 @@ export default function BookingPage() {
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <Link to="/dashboard" className="flex-1 inline-flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark transition-all">View Dashboard</Link>
-            <button onClick={() => { setSubmitted(false); setFormData({ date:'', time:'', service:'', notes:'' }); setSelectedDoctorId(''); setBookedSlots([]); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all">Book Another</button>
+            <button type="button" onClick={() => { setSubmitted(false); setFormData({ date:'', time:'', service:'', notes:'' }); setSelectedDoctorId(''); setBookedSlots([]); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all">Book Another</button>
           </div>
         </div>
       </div>
@@ -228,7 +228,7 @@ export default function BookingPage() {
           <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             {error}
-            <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">✕</button>
+            <button type="button" onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">✕</button>
           </div>
         )}
 

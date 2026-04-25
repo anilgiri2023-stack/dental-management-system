@@ -23,6 +23,7 @@ import {
   Loader2,
   Search,
   X,
+  Shield,
   BarChart3,
   TrendingUp,
 } from 'lucide-react';
@@ -76,8 +77,9 @@ export default function AdminDashboard() {
   const [deletingUserId, setDeletingUserId] = useState(null);
   const [showDeleteUserConfirm, setShowDeleteUserConfirm] = useState(null);
 
-  // Invite Doctor State
+  // Invite State
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteRole, setInviteRole] = useState('doctor'); // 'doctor' or 'admin'
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
@@ -173,25 +175,25 @@ export default function AdminDashboard() {
     setFilterStatus('All');
   };
 
-  // Invite Doctor Function (Implements the doctor invite system)
-  const handleInviteDoctor = async (e) => {
+  // Invite Function (Implements the doctor/admin invite system)
+  const handleInvite = async (e) => {
     e.preventDefault();
     setInviting(true);
     setError('');
     setSuccessMsg('');
     try {
-      await authFetch('/admin/invite-doctor', {
+      await authFetch(`/admin/invite-${inviteRole}`, {
         method: 'POST',
         body: JSON.stringify({ name: inviteName, email: inviteEmail }),
       });
-      setSuccessMsg(`Invitation sent to ${inviteEmail}`);
+      setSuccessMsg(`${inviteRole === 'admin' ? 'Admin' : 'Doctor'} invitation sent to ${inviteEmail}`);
       setShowInviteModal(false);
       setInviteName('');
       setInviteEmail('');
       if (activeTab === 'users') fetchUsers();
     } catch (err) {
-      console.error('Invite doctor error:', err);
-      setError(err.message || 'Failed to invite doctor');
+      console.error(`Invite ${inviteRole} error:`, err);
+      setError(err.message || `Failed to invite ${inviteRole}`);
     } finally {
       setInviting(false);
     }
@@ -569,7 +571,7 @@ export default function AdminDashboard() {
                             {/* Doctor */}
                             <td className="px-6 py-4 hidden sm:table-cell">
                               <span className="text-sm font-medium text-gray-700">
-                                {apt.doctor_name && apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'N/A'}
+                                {apt.doctorId?.name ? `Dr. ${apt.doctorId.name}` : 'N/A'}
                               </span>
                             </td>
 
@@ -665,10 +667,28 @@ export default function AdminDashboard() {
             
             {/* Upcoming Appointments List with Doctor */}
             {(() => {
-              const todayDateStr = new Date().toISOString().split('T')[0];
+              const parseDateTime = (dateStr, timeStr) => {
+                if (!dateStr || !timeStr) return new Date();
+                const [year, month, day] = dateStr.split("-");
+                let [timePart, ampm] = timeStr.split(" ");
+                if (!timePart) return new Date(year, month - 1, day);
+                
+                let [hour, minute] = timePart.split(":");
+                hour = parseInt(hour);
+                if (ampm === "PM" && hour !== 12) hour += 12;
+                if (ampm === "AM" && hour === 12) hour = 0;
+
+                return new Date(year, month - 1, day, hour, minute);
+              };
+
+              const now = new Date();
               const upcomingList = appointments
-                .filter(a => a.status === 'Approved' && a.date >= todayDateStr)
-                .sort((a, b) => new Date(`${a.date}T${a.time || '00:00'}`) - new Date(`${b.date}T${b.time || '00:00'}`));
+                .filter(a => {
+                  if (!a.time) return false;
+                  const dt = parseDateTime(a.date, a.time);
+                  return dt > now;
+                })
+                .sort((a, b) => parseDateTime(a.date, a.time) - parseDateTime(b.date, b.time));
 
               if (upcomingList.length === 0) return null;
 
@@ -684,11 +704,11 @@ export default function AdminDashboard() {
                         <div className="text-sm text-gray-700">
                           <span className="font-semibold text-gray-900">{apt.name}</span>
                           <span className="mx-2 text-gray-300">→</span>
-                          <span className="font-medium text-emerald-600">{apt.doctor_name && apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'N/A'}</span>
+                          <span className="font-medium text-emerald-600">{apt.doctorId?.name ? `Dr. ${apt.doctorId.name}` : 'N/A'}</span>
                         </div>
                         <div className="text-sm text-gray-500 flex items-center gap-1.5 shrink-0">
-                          {new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          {apt.time && <> &bull; {new Date(`2000-01-01T${apt.time}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</>}
+                          {new Date(`${apt.date} ${apt.time || '00:00'}`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {apt.time && <> &bull; {new Date(`${apt.date} ${apt.time}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</>}
                         </div>
                       </div>
                     ))}
@@ -708,7 +728,14 @@ export default function AdminDashboard() {
               </h2>
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => setShowInviteModal(true)}
+                  onClick={() => { setInviteRole('admin'); setShowInviteModal(true); }}
+                  className="inline-flex items-center gap-2 bg-slate-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-slate-900 transition-colors"
+                >
+                  <Mail className="w-4 h-4" />
+                  Invite Admin
+                </button>
+                <button
+                  onClick={() => { setInviteRole('doctor'); setShowInviteModal(true); }}
                   className="inline-flex items-center gap-2 bg-primary text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-primary-dark transition-colors"
                 >
                   <Mail className="w-4 h-4" />
@@ -734,6 +761,16 @@ export default function AdminDashboard() {
                     }`}
                   >
                     Doctors
+                  </button>
+                  <button
+                    onClick={() => setUserRoleFilter('admin')}
+                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      userRoleFilter === 'admin'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Admins
                   </button>
                 </div>
                 <button
@@ -801,14 +838,20 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {users
-                        .filter(u => userRoleFilter === 'doctor' ? u.role === 'doctor' : (u.role === 'user' || u.role === 'patient'))
+                        .filter(u => {
+                          if (userRoleFilter === 'admin') return u.role === 'admin';
+                          if (userRoleFilter === 'doctor') return u.role === 'doctor';
+                          return u.role === 'user' || u.role === 'patient';
+                        })
                         .map((u) => (
                         <tr key={u.id} className="hover:bg-gray-50/50 transition-colors group">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
-                                {u.role === 'doctor' ? <Stethoscope className="w-4 h-4 text-primary" /> : <User className="w-4 h-4 text-primary" />}
-                              </div>
+                                <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
+                                  {u.role === 'admin' ? <Shield className="w-4 h-4 text-primary" /> : 
+                                   u.role === 'doctor' ? <Stethoscope className="w-4 h-4 text-primary" /> : 
+                                   <User className="w-4 h-4 text-primary" />}
+                                </div>
                               <span className="text-sm font-semibold text-gray-900">
                                 {u.name || u.email?.split('@')[0] || 'User'}
                               </span>
@@ -823,9 +866,9 @@ export default function AdminDashboard() {
                           <td className="px-6 py-4 hidden sm:table-cell">
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
                               u.role === 'admin'
-                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                : u.role === 'doctor'
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : u.role === 'doctor'
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}>
                               {u.role === 'user' ? 'patient' : u.role || 'patient'}
@@ -984,14 +1027,14 @@ export default function AdminDashboard() {
         ) : null}
 
 
-        {/* Invite Doctor Modal */}
+        {/* Invite Modal */}
         {showInviteModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                   <Mail className="w-5 h-5 text-primary" />
-                  Invite Doctor
+                  Invite {inviteRole === 'admin' ? 'Admin' : 'Doctor'}
                 </h3>
                 <button
                   onClick={() => setShowInviteModal(false)}
@@ -1000,17 +1043,17 @@ export default function AdminDashboard() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <form onSubmit={handleInviteDoctor} className="p-6 space-y-4">
+              <form onSubmit={handleInvite} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Doctor's Name
+                    {inviteRole === 'admin' ? 'Admin\'s Name' : 'Doctor\'s Name'}
                   </label>
                   <input
                     type="text"
                     required
                     value={inviteName}
                     onChange={(e) => setInviteName(e.target.value)}
-                    placeholder="e.g. Dr. Sarah Jenkins"
+                    placeholder={inviteRole === 'admin' ? 'e.g. John Doe' : 'e.g. Dr. Sarah Jenkins'}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
                   />
                 </div>

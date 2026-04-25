@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../utils/api';
+import { supabase } from '../utils/supabase';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function SetPassword() {
   const [password, setPassword] = useState('');
@@ -11,34 +13,48 @@ export default function SetPassword() {
   const [sessionReady, setSessionReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [success, setSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const handleAuthSession = async () => {
       try {
+        console.log("FULL URL:", window.location.href);
         const hash = window.location.hash;
-
+        console.log("HASH:", hash);
+        
         if (hash && hash.includes('access_token')) {
-          // Extract tokens from URL hash manually
-          const params = new URLSearchParams(hash.replace('#', ''));
-          const access_token = params.get('access_token');
-          const type = params.get('type'); // 'invite' or 'recovery'
+          const params = new URLSearchParams(hash.substring(1));
+          const access_token = params.get("access_token");
+          console.log("TOKEN:", access_token);
 
           if (!access_token) {
-            setError('Invalid invite link. No access token found.');
+            setError('No invite token found. Please use the link in your email.');
             setInitializing(false);
             return;
           }
 
-          console.log('Detected access token from URL, type:', type);
+          // Set Supabase session so auth.getUser works on backend
+          const { error: sessionErr } = await supabase.auth.setSession({
+            access_token,
+            refresh_token: access_token
+          });
+
+          if (sessionErr) {
+            console.error("Session set error:", sessionErr);
+            setError('Verification failed. Your link may be expired.');
+            setInitializing(false);
+            return;
+          }
+
           setAccessToken(access_token);
           setSessionReady(true);
-          
           // Clean URL hash
           window.history.replaceState(null, '', window.location.pathname);
           setInitializing(false);
         } else {
-          setError('No invite token found. Please click the link in your invitation email to set your password.');
+          setError('No invite token found. Please use the link in your email.');
           setInitializing(false);
         }
       } catch (err) {
@@ -79,10 +95,14 @@ export default function SetPassword() {
       }
 
       setSuccess(true);
-
-      // Redirect to doctor login after success
+      
+      // Redirect based on role
       setTimeout(() => {
-        navigate('/login/doctor');
+        if (data.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else {
+          navigate('/login/doctor');
+        }
       }, 2500);
     } catch (err) {
       console.error('Set password error:', err);
@@ -113,7 +133,7 @@ export default function SetPassword() {
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Password Set Successfully!</h2>
-          <p className="text-slate-600">Redirecting to doctor login...</p>
+          <p className="text-slate-600">Redirecting to login...</p>
         </div>
       </div>
     );
@@ -127,7 +147,7 @@ export default function SetPassword() {
           Set Your Password
         </h2>
         <p className="mt-2 text-center text-sm text-slate-600">
-          Welcome, Doctor! Please set a password for your account.
+          Welcome! Please set a password for your account.
         </p>
       </div>
 
@@ -143,33 +163,47 @@ export default function SetPassword() {
             <form className="space-y-6" onSubmit={handleSubmit}>
               <div>
                 <label className="block text-sm font-medium text-slate-700">New Password</label>
-                <div className="mt-1">
+                <div className="mt-1 relative">
                   <input
                     id="set-password-new"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     required
                     minLength={6}
-                    className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm"
+                    className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm pr-10"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Min 6 characters"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700">Confirm Password</label>
-                <div className="mt-1">
+                <div className="mt-1 relative">
                   <input
                     id="set-password-confirm"
-                    type="password"
+                    type={showConfirm ? "text" : "password"}
                     required
                     minLength={6}
-                    className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm"
+                    className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm pr-10"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Re-enter password"
+                    placeholder="Repeat password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  >
+                    {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 

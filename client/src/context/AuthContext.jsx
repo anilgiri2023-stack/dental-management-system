@@ -82,18 +82,50 @@ export function AuthProvider({ children }) {
   };
 
   // Verify OTP and login — returns user with role
+  // Ensures session is fully established before returning
   const verifyOtp = async (identifier, type, otp, name, phone) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔑 Verifying OTP...');
-    }
-    const data = await apiFetch('/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ identifier, type, otp, name, phone }),
-    });
+    console.log('🔑 Verifying OTP...');
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('✅ Login successful, role:', data.user?.role);
+    // Helper: attempt verification with retry
+    async function attemptVerify(retryCount = 0) {
+      const data = await apiFetch('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ identifier, type, otp, name, phone }),
+      });
+
+      console.log('📦 verify-otp response:', { 
+        success: data.success, 
+        hasToken: !!data.token, 
+        user: data.user ? { id: data.user.id, email: data.user.email, role: data.user.role } : null 
+      });
+
+      // Validate session: must have both token and user
+      if (!data.token || !data.user) {
+        console.error('❌ Session not established — missing token or user');
+        if (retryCount === 0) {
+          console.log('⏳ Retrying verification in 1 second...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return attemptVerify(1);
+        }
+        throw new Error('Login failed, retry OTP');
+      }
+
+      return data;
     }
+
+    let data;
+    try {
+      data = await attemptVerify();
+    } catch (err) {
+      console.error('❌ OTP verification failed:', err.message);
+      // If error is "Login failed, retry OTP", pass it through
+      throw err;
+    }
+
+    console.log('✅ Session established successfully');
+    console.log('🔐 Session token:', data.token ? `${data.token.substring(0, 20)}...` : 'MISSING');
+    console.log('👤 Authenticated user:', { id: data.user.id, email: data.user.email, role: data.user.role });
+
     // Save session — user object includes id, email, role
     localStorage.setItem('cs_token', data.token);
     localStorage.setItem('cs_user', JSON.stringify(data.user));

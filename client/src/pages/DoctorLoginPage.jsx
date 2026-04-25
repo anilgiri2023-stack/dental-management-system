@@ -12,6 +12,7 @@ export default function DoctorLoginPage() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
 
   const { doctorLogin, isAuthenticated, user } = useAuth();
@@ -46,6 +47,7 @@ export default function DoctorLoginPage() {
       setError('Please enter your email address first.');
       return;
     }
+    if (cooldown > 0) return;
     setError('');
     setSuccessMsg('');
     setLoading(true);
@@ -58,14 +60,36 @@ export default function DoctorLoginPage() {
 
       if (!data.success) {
         console.error('EMAIL FAILED');
-        setError(data.message || 'Failed to send reset link');
+        const msg = data.message || 'Failed to send reset link';
+        if (msg.toLowerCase().includes('rate limit')) {
+          setError('Too many requests. Please wait a while before trying again.');
+        } else {
+          setError(msg);
+        }
       } else {
         console.log('EMAIL SENT SUCCESS');
         setSuccessMsg(data.message || 'Check your inbox or spam folder');
+        
+        // Start 60s countdown
+        setCooldown(60);
+        const interval = setInterval(() => {
+          setCooldown(prev => {
+            if (prev <= 1) {
+              clearInterval(interval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
       }
     } catch (err) {
       console.error('EMAIL FAILED', err);
-      setError(err.message || 'Failed to send reset link.');
+      const msg = err.message || 'Failed to send reset link.';
+      if (msg.toLowerCase().includes('rate limit')) {
+        setError('Too many requests. Please wait a while before trying again.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -127,9 +151,10 @@ export default function DoctorLoginPage() {
                 </div>
               )}
               
-              <button type="submit" disabled={loading}
+              <button type="submit" disabled={loading || cooldown > 0}
                 className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold hover:bg-emerald-700 transition-all duration-300 hover:shadow-lg hover:shadow-emerald-600/25 disabled:opacity-60 disabled:cursor-not-allowed group mt-2">
                 {loading ? (<><Loader2 className="w-5 h-5 animate-spin" /> {forgotPasswordMode ? 'Sending...' : 'Authenticating...'}</>)
+                  : cooldown > 0 ? `Wait ${cooldown}s`
                   : forgotPasswordMode ? 'Send Reset Link' : (<><ShieldCheck className="w-4 h-4" /> Access Portal</>)}
               </button>
             </form>

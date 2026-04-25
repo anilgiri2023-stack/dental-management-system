@@ -6,7 +6,8 @@
 -- 1. Add new columns
 ALTER TABLE public.reports 
 ADD COLUMN IF NOT EXISTS appointment_id UUID REFERENCES public.appointments(id) ON DELETE CASCADE,
-ADD COLUMN IF NOT EXISTS title TEXT;
+ADD COLUMN IF NOT EXISTS title TEXT,
+ADD COLUMN IF NOT EXISTS "uploadedAt" TIMESTAMPTZ;
 
 -- 2. Enable RLS
 ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;

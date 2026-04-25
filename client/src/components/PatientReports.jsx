@@ -1,4 +1,8 @@
 import { FileText, Download } from 'lucide-react';
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+
+dayjs.extend(utc);
 
 export default function PatientReports({ reports }) {
   if (!reports || reports.length === 0) {
@@ -32,7 +36,7 @@ export default function PatientReports({ reports }) {
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor_name || 'Doctor'}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} • {new Date(r.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                    {dayjs.utc(r.uploadedAt || r.created_at).local().format("MMM DD, YYYY • hh:mm A")}
                   </p>
 
                 </div>

@@ -13,9 +13,10 @@ const fs = require('fs');
 const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
-const { sendEmail } = require('./services/emailService');
 
-dotenv.config();
+dotenv.config(); // Must be called before local imports
+
+const { sendEmail } = require('./services/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,10 +33,11 @@ const supabase = createClient(
 );
 
 // ─── Nodemailer ──────────────────────────────────────────
+console.log("EMAIL:", process.env.SMTP_USER);
+console.log("PASS:", process.env.SMTP_PASS);
+
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
+  service: "gmail",
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
@@ -69,7 +71,8 @@ function authMiddleware(req, res, next) {
   try {
     req.user = jwt.verify(header.split(' ')[1], JWT_SECRET);
     next();
-  } catch {
+  } catch (err) {
+    console.error('JWT verify failed:', err.message);
     return res.status(401).json({ success: false, message: 'Session expired' });
   }
 }
@@ -187,16 +190,52 @@ app.post('/verify-otp', async (req, res) => {
     // OTP correct — clear it
     otpStore.delete(email);
 
+    // ─── Session & DB query with retry ───
+    console.log('🔐 OTP verified for:', email);
+    console.log('🔍 Attempting to query users table...');
+
+    // Helper: query users table with a single retry on permission error
+    async function queryUsersTable(email, attempt = 1) {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (error) {
+        console.error(`❌ Users table query failed (attempt ${attempt}):`, error.message, '| Code:', error.code);
+        // Retry once after a short delay (session propagation)
+        if (attempt === 1 && (error.message.includes('permission denied') || error.code === '42501')) {
+          console.log('⏳ Retrying users query in 1 second...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return queryUsersTable(email, 2);
+        }
+        // If still failing after retry, it's a config issue
+        if (error.message.includes('permission denied') || error.code === '42501') {
+          console.error('🚨 CRITICAL: Service role key may be wrong. Server is using anon key instead of service_role key.');
+          console.error('🚨 Fix: Update SUPABASE_SERVICE_ROLE_KEY in .env with the real service_role key from Supabase Dashboard → Settings → API');
+          throw new Error('Login failed, retry OTP');
+        }
+        // PGRST116 = no rows found, that's OK (new user)
+        if (error.code === 'PGRST116') return null;
+        throw error;
+      }
+
+      console.log('✅ Session valid — user query successful');
+      console.log('👤 User found:', { id: data?.id, email: data?.email, role: data?.role });
+      return data;
+    }
+
     // Find or create user in "users" table
     let user;
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', email)
-      .single();
+    try {
+      user = await queryUsersTable(email);
+    } catch (queryError) {
+      console.error('❌ Failed to query users table:', queryError.message);
+      return res.status(500).json({ success: false, message: queryError.message || 'Login failed, retry OTP' });
+    }
 
-    if (existingUser) {
-      user = existingUser;
+    if (user) {
       console.log(`✅ Existing user: ${user.id}`);
       // Update name/phone if provided and different
       let updates = {};
@@ -204,8 +243,12 @@ app.post('/verify-otp', async (req, res) => {
       if (phone && user.phone !== phone) updates.phone = phone;
 
       if (Object.keys(updates).length > 0) {
-        const { data: updatedUser } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
-        if (updatedUser) user = updatedUser;
+        const { data: updatedUser, error: updateErr } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
+        if (updateErr) {
+          console.error('⚠️ User update failed:', updateErr.message);
+        } else if (updatedUser) {
+          user = updatedUser;
+        }
       }
     } else {
       // Validate required fields for new user
@@ -225,7 +268,10 @@ app.post('/verify-otp', async (req, res) => {
         .single();
 
       if (createErr) {
-        console.error('Create user error:', createErr);
+        console.error('❌ Create user error:', createErr.message, '| Code:', createErr.code);
+        if (createErr.message.includes('permission denied') || createErr.code === '42501') {
+          return res.status(500).json({ success: false, message: 'Login failed, retry OTP' });
+        }
         return res.status(400).json({ success: false, message: createErr.message || 'Failed to create user' });
       }
       user = newUser;
@@ -240,6 +286,8 @@ app.post('/verify-otp', async (req, res) => {
       phone: user.phone,
       role: user.role || 'user',
     });
+
+    console.log('🎫 JWT issued for:', { id: user.id, email: user.email, role: user.role });
 
     res.json({
       success: true,
@@ -270,7 +318,7 @@ app.post('/api/auth/check-user', async (req, res) => {
     if (!email) return res.status(400).json({ success: false, message: 'Email required' });
     const { data } = await supabase.from('users').select('id').eq('email', email.trim().toLowerCase()).single();
     res.json({ success: true, exists: !!data });
-  } catch {
+  } catch (err) {
     // If no row found, supabase throws — treat as "does not exist"
     res.json({ success: true, exists: false });
   }
@@ -289,7 +337,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       return res.json({ success: true, user: { id: data.id, email: data.email, name: data.name, phone: data.phone, role: data.role, avatar_url: data.avatar_url || null } });
     }
     res.json({ success: true, user: req.user });
-  } catch {
+  } catch (err) {
     res.json({ success: true, user: req.user });
   }
 });
@@ -307,17 +355,52 @@ app.post('/api/auth/update-profile', authMiddleware, (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // Admin Login (password-based)
 // ═══════════════════════════════════════════════════════════
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   const { email, password } = req.body;
   const adminEmail = process.env.ADMIN_EMAIL || 'anilofficial2005@gmail.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'Anil@8080';
 
-  if (email !== adminEmail) return res.status(403).json({ success: false, message: 'Not an admin' });
-  if (password !== adminPassword) return res.status(401).json({ success: false, message: 'Wrong password' });
+  // 1. Check Super Admin (env)
+  if (email === adminEmail && password === adminPassword) {
+    const token = signToken({ id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' });
+    console.log('✅ Super Admin login');
+    return res.json({ success: true, token, user: { id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' } });
+  }
 
-  const token = signToken({ id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' });
-  console.log('✅ Admin login');
-  res.json({ success: true, token, user: { id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' } });
+  // 2. Auth via Supabase
+  try {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password
+    });
+
+    if (authError || !authData.user) {
+      console.error('Auth error:', authError?.message);
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // 3. Verify Role in DB
+    const { data: dbUser, error: dbError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (dbError || !dbUser || dbUser.role !== 'admin') {
+      console.log('Role mismatch or user not found:', dbUser?.role);
+      return res.status(403).json({ success: false, message: 'Not an admin' });
+    }
+
+    console.log('SESSION:', authData.session ? 'Created' : 'Null');
+    console.log('USER:', authData.user.email);
+    console.log('DB USER:', dbUser.email, 'Role:', dbUser.role);
+
+    const token = signToken({ id: dbUser.id, email: dbUser.email, name: dbUser.name, role: 'admin' });
+    res.json({ success: true, token, user: { id: dbUser.id, email: dbUser.email, name: dbUser.name, role: 'admin' } });
+  } catch (err) {
+    console.error('Login exception:', err);
+    res.status(500).json({ success: false, message: 'Server error during login' });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -433,10 +516,37 @@ async function bookAppointment(req, res) {
 
     // ─── Email Logic ───
     if (email) {
-      const subject = 'Appointment Booked Successfully';
-      const message = `Dear ${name},\n\nYour appointment for ${service} has been successfully booked for ${new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at ${time}.\n\nWe will notify you once the doctor reviews and approves it.\n\nThank you,\nClinical Serenity`;
-      // Send email without blocking the response
-      sendEmail(email, subject, message);
+      try {
+        let doctorName = 'Doctor';
+        if (doctor_id) {
+          const { data: docData } = await supabase.from('users').select('name').eq('id', doctor_id).single();
+          if (docData && docData.name) {
+            doctorName = docData.name;
+          }
+        }
+        
+        const dateTime = `${date} ${time}`;
+        
+        console.log("Email function triggered");
+        
+        try {
+          await transporter.sendMail({
+            from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+            to: email,
+            subject: "Appointment Confirmation",
+            html: `
+              <h3>Appointment Confirmed</h3>
+              <p>You booked an appointment with <b>Dr. ${doctorName}</b></p>
+              <p>Date & Time: ${dateTime}</p>
+            `
+          });
+          console.log("Email sent");
+        } catch (err) {
+          console.error("Email error:", err);
+        }
+      } catch (err) {
+        console.error('Error fetching doctor details for email:', err);
+      }
     }
 
     console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${userId}]`);
@@ -478,23 +588,28 @@ async function getMyAppointments(req, res) {
     if ((req.user.role === 'admin' || req.user.role === 'doctor') && enriched.length > 0) {
       // Get unique user IDs
       const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
+      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
+      const allIds = [...new Set([...userIds, ...doctorIds])];
       
       const { data: usersData } = await supabase
         .from('users')
         .select('id, email, name, phone')
-        .in('id', userIds);
+        .in('id', allIds);
 
       const userMap = {};
       (usersData || []).forEach(u => { userMap[u.id] = u; });
 
       enriched = enriched.map(apt => {
         const dbUser = userMap[apt.user_id] || {};
+        const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
         return {
           ...apt,
           // Prioritize data in appointments table (set during booking), fallback to users table
           name: apt.name || dbUser.name || 'Patient',
           email: apt.email || dbUser.email || '',
           phone: apt.phone || dbUser.phone || '',
+          doctor_name: doctorUser ? doctorUser.name : 'N/A',
+          doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
         };
       });
     }
@@ -541,7 +656,8 @@ app.get('/all-appointments', authMiddleware, adminOnly, async (req, res) => {
           name: apt.name || dbUser.name || 'Patient',
           email: apt.email || dbUser.email || '',
           phone: apt.phone || dbUser.phone || '',
-          doctor_name: doctorUser ? doctorUser.name : 'N/A'
+          doctor_name: doctorUser ? doctorUser.name : 'N/A',
+          doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
         };
       });
     }
@@ -667,17 +783,28 @@ app.patch('/api/doctor/appointments/:id/status', authMiddleware, doctorOnly, asy
 
     // ─── Email Logic ───
     const patientEmail = apt.email || apt.patient_email; // Handle potential schema variations
+    console.log("STATUS:", status);
+    console.log("EMAIL:", patientEmail);
+
     if (patientEmail && status !== 'Pending') {
-      let subject, message;
-      if (status === 'Approved') {
-        subject = 'Appointment Approved';
-        message = 'Your appointment has been approved by the doctor.';
-      } else if (status === 'Rejected') {
-        subject = 'Appointment Rejected';
-        message = 'Your appointment has been rejected. Please contact clinic.';
+      try {
+        const doctorName = req.user.name || 'Doctor';
+        const formattedDate = new Date(apt.date).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+        
+        await transporter.sendMail({
+          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+          to: patientEmail,
+          subject: "Appointment Status Update",
+          html: `
+            <h3>Appointment Update</h3>
+            <p>Your appointment with <b>Dr. ${doctorName}</b></p>
+            <p>Date & Time: ${formattedDate} ${apt.time || ''}</p>
+            <p>Status: <b>${status}</b></p>
+          `
+        });
+      } catch (emailErr) {
+        console.error('Email error:', emailErr);
       }
-      // Send email without blocking the response
-      sendEmail(patientEmail, subject, message);
     } else {
       console.log(`⚠️ No email sent for appointment ${appointmentId}. Status: ${status}`);
     }
@@ -749,7 +876,7 @@ app.get('/api/avatar', authMiddleware, async (req, res) => {
     const { data } = await supabase
       .from('users').select('avatar_url').eq('id', req.user.id).single();
     res.json({ success: true, avatar_url: data?.avatar_url || null });
-  } catch {
+  } catch (err) {
     res.json({ success: true, avatar_url: null });
   }
 });
@@ -772,7 +899,14 @@ app.delete('/api/appointments/:id', authMiddleware, adminOnly, async (req, res) 
 // ═══════════════════════════════════════════════════════════
 app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select('*').order('id', { ascending: false });
+    const { role } = req.query;
+    let query = supabase.from('users').select('*').order('id', { ascending: false });
+    
+    if (role) {
+      query = query.eq('role', role);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     res.json({ success: true, users: data || [] });
   } catch (error) {
@@ -867,6 +1001,60 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
   } catch (error) {
     console.error('SERVER ERROR — Invite doctor:', error);
     res.status(500).json({ success: false, message: 'Server error during invite' });
+  }
+});
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/invite-admin — admin only
+// ═══════════════════════════════════════════════════════════
+app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) => {
+  console.log("Invite Admin API HIT");
+  try {
+    const { email, name } = req.body;
+    if (!email || !name) {
+      return res.status(400).json({ success: false, message: 'Email and name are required' });
+    }
+
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: 'invite',
+      email: email.trim().toLowerCase(),
+      options: {
+        data: { name: name.trim(), role: 'admin' },
+        redirectTo: 'http://localhost:5173/set-password'
+      }
+    });
+
+    if (linkError) {
+      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate invite link' });
+    }
+
+    const actionLink = linkData.properties?.action_link;
+
+    try {
+      await transporter.sendMail({
+        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+        to: email.trim().toLowerCase(),
+        subject: 'Admin Invitation — Clinical Serenity',
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
+            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
+            <p style="color:#475569;font-size:15px">Hi ${name},</p>
+            <p style="color:#475569;font-size:15px">You have been invited to join Clinical Serenity as an Administrator.</p>
+            <div style="text-align:center;margin:30px 0;">
+              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Accept Invitation & Set Password</a>
+            </div>
+            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      await supabase.auth.admin.deleteUser(linkData.user.id);
+      return res.status(500).json({ success: false, message: 'Failed to send invite email. Please try again.' });
+    }
+
+    res.json({ success: true, message: 'Admin invited successfully. Email sent to ' + email });
+  } catch (error) {
+    console.error('SERVER ERROR — Invite admin:', error);
+    res.status(500).json({ success: false, message: 'Server error during admin invite' });
   }
 });
 
@@ -1014,7 +1202,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     if (error) {
       console.error('❌ Supabase resetPasswordForEmail failed:', error.message);
-      return res.status(500).json({ success: false, message: error.message });
+      return res.status(400).json({ success: false, message: error.message });
     }
 
     console.log(`✅ Supabase reset email triggered for: ${email}`);
@@ -1054,20 +1242,24 @@ app.post('/api/auth/complete-reset-password', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Failed to update Auth password: ' + updateAuthErr.message });
     }
 
-    // 3. Update password in our public.users table
-    const { error: updateDbErr } = await supabase
-      .from('users')
-      .update({ password: password })
-      .eq('id', user.id);
+    // 3. Upsert user into public.users table based on user_metadata
+    const { error: updateDbErr } = await supabase.from("users").upsert({
+      id: user.id,
+      email: user.email,
+      name: user.user_metadata?.name || 'Admin User',
+      role: user.user_metadata?.role === 'admin' ? 'admin' : (user.user_metadata?.role || 'admin')
+    });
 
     if (updateDbErr) {
-      console.error('❌ Reset password — public.users update failed:', updateDbErr.message);
-      // We don't fail the whole request here as the Auth password is already updated, 
-      // but it's good to log it.
+      console.error('❌ Reset password — public.users upsert failed:', updateDbErr.message);
     }
 
     console.log(`✅ Password reset complete for: ${user.email}`);
-    res.json({ success: true, message: 'Your password has been reset successfully.' });
+    res.json({ 
+      success: true, 
+      message: 'Your password has been reset successfully.',
+      role: user.user_metadata?.role || 'user'
+    });
   } catch (err) {
     console.error('❌ SERVER ERROR — Complete reset password:', err);
     res.status(500).json({ success: false, message: 'Server error during password reset' });
@@ -1230,6 +1422,7 @@ app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file')
       appointment_id: appointment_id || null,
       title: title || 'Medical Report',
       file_url,
+      uploadedAt: new Date()
     };
 
     console.log('📝 INSERT PAYLOAD for reports table:', JSON.stringify(insertPayload, null, 2));
@@ -1642,6 +1835,35 @@ app.listen(PORT, async () => {
   console.log('═══════════════════════════════════════════');
   console.log(`🚀 Clinical Serenity API — Port ${PORT}`);
   console.log('═══════════════════════════════════════════');
+
+  // ─── Validate service role key ───
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!serviceKey || serviceKey === 'PASTE_YOUR_REAL_SERVICE_ROLE_KEY_HERE') {
+    console.error('');
+    console.error('🚨🚨🚨 CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not set!');
+    console.error('   Go to Supabase Dashboard → Settings → API → service_role (secret)');
+    console.error('   Paste it into server/.env as SUPABASE_SERVICE_ROLE_KEY=<key>');
+    console.error('   Without this, ALL database queries will fail with "permission denied"');
+    console.error('');
+  } else {
+    // Decode the JWT to check if it's actually the anon key
+    try {
+      const payload = JSON.parse(Buffer.from(serviceKey.split('.')[1], 'base64').toString());
+      if (payload.role === 'anon') {
+        console.error('');
+        console.error('🚨🚨🚨 CRITICAL: SUPABASE_SERVICE_ROLE_KEY contains the ANON key, not the service_role key!');
+        console.error('   Current key role:', payload.role);
+        console.error('   Go to Supabase Dashboard → Settings → API → service_role (secret)');
+        console.error('   Replace the key in server/.env — it must have role "service_role"');
+        console.error('   This is why you get "permission denied" on the users table!');
+        console.error('');
+      } else {
+        console.log(`✅ Supabase key role: ${payload.role}`);
+      }
+    } catch (e) {
+      console.warn('⚠️  Could not decode service role key to verify role');
+    }
+  }
 
   // Verify database
   try {
