@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../utils/supabase';
+import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../utils/api';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   useEffect(() => {
     const handleAuthSession = async () => {
@@ -22,7 +22,6 @@ export default function ResetPassword() {
           // Extract tokens from URL hash manually
           const params = new URLSearchParams(hash.replace('#', ''));
           const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token') || access_token;
           const type = params.get('type'); // 'recovery'
 
           if (!access_token) {
@@ -32,41 +31,14 @@ export default function ResetPassword() {
           }
 
           console.log('Setting session from reset link, type:', type);
-
-          // Set session using extracted tokens
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-          });
-
-          if (sessionError) {
-            console.error('Session error:', sessionError);
-            if (sessionError.message?.includes('expired') || sessionError.message?.includes('invalid')) {
-              setError('This reset link has expired. Please request a new one.');
-            } else {
-              setError(sessionError.message || 'Failed to verify reset link.');
-            }
-            setInitializing(false);
-            return;
-          }
-
-          if (data?.session) {
-            console.log('Session established for:', data.session.user.email);
-            setSessionReady(true);
-            // Clean URL hash
-            window.history.replaceState(null, '', window.location.pathname);
-          } else {
-            setError('Could not establish session. The link may have expired.');
-          }
+          setAccessToken(access_token);
+          setSessionReady(true);
+          
+          // Clean URL hash
+          window.history.replaceState(null, '', window.location.pathname);
           setInitializing(false);
         } else {
-          // No hash tokens — check if there's already an active session
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            setSessionReady(true);
-          } else {
-            setError('No reset token found. Please click the link in your email to reset your password.');
-          }
+          setError('No reset token found. Please click the link in your email to reset your password.');
           setInitializing(false);
         }
       } catch (err) {
@@ -94,30 +66,23 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      // 1. Update password in Supabase Auth
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
+      // Use backend API to update password in both Auth and our users table
+      await apiFetch('/auth/complete-reset-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          password: password,
+          access_token: accessToken
+        })
       });
-
-      if (updateError) throw updateError;
-
-      // 2. Also store password in our custom users table (doctor login uses it)
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('users')
-          .update({ password: password })
-          .eq('id', user.id);
-      }
 
       setSuccess(true);
 
-      // 3. Sign out and redirect to appropriate login
+      // Sign out and redirect to login
       setTimeout(() => {
-        supabase.auth.signOut().then(() => {
-          // We can guess where to send them based on user role if needed, but for now just send to main login
-          navigate('/login');
-        });
+        // Clear any local tokens
+        localStorage.removeItem('cs_token');
+        localStorage.removeItem('cs_user');
+        navigate('/login');
       }, 2500);
     } catch (err) {
       console.error('Reset password error:', err);

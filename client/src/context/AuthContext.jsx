@@ -22,23 +22,29 @@ export function AuthProvider({ children }) {
 
   // Persist user to localStorage whenever it changes
   useEffect(() => {
+    console.log('👤 AuthContext state:', { user: user ? { id: user.id, email: user.email, role: user.role } : null, loading });
     if (user) {
       localStorage.setItem('cs_user', JSON.stringify(user));
     } else {
       localStorage.removeItem('cs_user');
     }
-  }, [user]);
+  }, [user, loading]);
 
   // Helper — make authenticated request
   const authFetch = useCallback(async (url, options = {}) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🌐 API Request: ${url}`);
+    }
     return apiFetch(url, options);
   }, []);
 
   // Validate token on mount
   useEffect(() => {
     const validateSession = async () => {
+      console.log('🔄 AuthContext: Validating session on mount...');
       const savedToken = localStorage.getItem('cs_token');
       if (!savedToken) {
+        console.log('🔄 AuthContext: No saved token found, user is null');
         setUser(null);
         setToken(null);
         setLoading(false);
@@ -46,10 +52,11 @@ export function AuthProvider({ children }) {
       }
       try {
         const data = await apiFetch('/auth/me');
+        console.log('🔄 AuthContext: Session validated:', { role: data.user?.role, email: data.user?.email });
         setUser(data.user);
         setToken(savedToken);
       } catch (err) {
-        console.error('Session validation error:', err);
+        console.error('❌ AuthContext: Session validation error:', err);
         localStorage.removeItem('cs_token');
         localStorage.removeItem('cs_user');
         setToken(null);
@@ -65,6 +72,9 @@ export function AuthProvider({ children }) {
 
   // Send OTP to email or phone
   const sendOtp = async (identifier, type) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`📧 Sending OTP to ${identifier} (${type})`);
+    }
     return apiFetch('/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ identifier, type }),
@@ -73,11 +83,17 @@ export function AuthProvider({ children }) {
 
   // Verify OTP and login — returns user with role
   const verifyOtp = async (identifier, type, otp, name, phone) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔑 Verifying OTP...');
+    }
     const data = await apiFetch('/auth/verify-otp', {
       method: 'POST',
       body: JSON.stringify({ identifier, type, otp, name, phone }),
     });
 
+    if (process.env.NODE_ENV === 'development') {
+      console.log('✅ Login successful, role:', data.user?.role);
+    }
     // Save session — user object includes id, email, role
     localStorage.setItem('cs_token', data.token);
     localStorage.setItem('cs_user', JSON.stringify(data.user));
@@ -88,11 +104,15 @@ export function AuthProvider({ children }) {
 
   // ─── Admin Auth ───
   const adminLogin = async (email, password) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔐 Admin login attempt...');
+    }
     const data = await apiFetch('/admin/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
 
+    console.log('✅ Admin login successful');
     localStorage.setItem('cs_token', data.token);
     localStorage.setItem('cs_user', JSON.stringify(data.user));
     setToken(data.token);
@@ -102,11 +122,13 @@ export function AuthProvider({ children }) {
 
   // ─── Doctor Auth ───
   const doctorLogin = async (email, password) => {
+    console.log('🩺 Doctor login attempt...');
     const data = await apiFetch('/doctor/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
 
+    console.log('✅ Doctor login successful, user:', data.user);
     localStorage.setItem('cs_token', data.token);
     localStorage.setItem('cs_user', JSON.stringify(data.user));
     setToken(data.token);
@@ -151,6 +173,8 @@ export function AuthProvider({ children }) {
         adminLoading,
         isAuthenticated,
         isAdminLoggedIn,
+        isDoctorLoggedIn,
+        setUser,
         sendOtp,
         verifyOtp,
         adminLogin,

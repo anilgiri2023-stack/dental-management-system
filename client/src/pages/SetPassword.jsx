@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../utils/supabase';
+import { apiFetch } from '../utils/api';
 
 export default function SetPassword() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [accessToken, setAccessToken] = useState('');
   const [sessionReady, setSessionReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [success, setSuccess] = useState(false);
@@ -21,7 +22,6 @@ export default function SetPassword() {
           // Extract tokens from URL hash manually
           const params = new URLSearchParams(hash.replace('#', ''));
           const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token') || access_token;
           const type = params.get('type'); // 'invite' or 'recovery'
 
           if (!access_token) {
@@ -30,42 +30,15 @@ export default function SetPassword() {
             return;
           }
 
-          console.log('Setting session from invite link, type:', type);
-
-          // Set session using extracted tokens
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-          });
-
-          if (sessionError) {
-            console.error('Session error:', sessionError);
-            if (sessionError.message?.includes('expired') || sessionError.message?.includes('invalid')) {
-              setError('This invite link has expired. Please ask your admin to send a new invitation.');
-            } else {
-              setError(sessionError.message || 'Failed to verify invite link.');
-            }
-            setInitializing(false);
-            return;
-          }
-
-          if (data?.session) {
-            console.log('Session established for:', data.session.user.email);
-            setSessionReady(true);
-            // Clean URL hash
-            window.history.replaceState(null, '', window.location.pathname);
-          } else {
-            setError('Could not establish session. The invite link may have expired. Please ask your admin to resend the invitation.');
-          }
+          console.log('Detected access token from URL, type:', type);
+          setAccessToken(access_token);
+          setSessionReady(true);
+          
+          // Clean URL hash
+          window.history.replaceState(null, '', window.location.pathname);
           setInitializing(false);
         } else {
-          // No hash tokens — check if there's already an active session
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            setSessionReady(true);
-          } else {
-            setError('No invite token found. Please click the link in your invitation email to set your password.');
-          }
+          setError('No invite token found. Please click the link in your invitation email to set your password.');
           setInitializing(false);
         }
       } catch (err) {
@@ -93,37 +66,27 @@ export default function SetPassword() {
 
     setLoading(true);
     try {
-      // 1. Update password in Supabase Auth
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
+      const data = await apiFetch('/auth/complete-reset-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          password,
+          access_token: accessToken
+        })
       });
 
-      if (updateError) throw updateError;
-
-      // 2. Also store password in our custom users table (doctor login uses it)
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('users')
-          .update({ password: password })
-          .eq('id', user.id);
+      if (!data.success) {
+        throw new Error(data.message || 'Failed to set password');
       }
 
       setSuccess(true);
 
-      // 3. Sign out and redirect to doctor login
+      // Redirect to doctor login after success
       setTimeout(() => {
-        supabase.auth.signOut().then(() => {
-          navigate('/login/doctor');
-        });
+        navigate('/login/doctor');
       }, 2500);
     } catch (err) {
       console.error('Set password error:', err);
-      if (err.message?.includes('expired') || err.message?.includes('invalid')) {
-        setError('Your session has expired. Please ask your admin to resend the invitation.');
-      } else {
-        setError(err.message || 'Failed to set password');
-      }
+      setError(err.message || 'Failed to set password');
     } finally {
       setLoading(false);
     }

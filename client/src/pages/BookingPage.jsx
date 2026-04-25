@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import supabase from '../utils/supabase';
 import {
   Sparkles, ArrowLeft, Calendar, Clock, Send,
   CheckCircle2, Stethoscope, FileText, Loader2,
@@ -49,62 +48,31 @@ export default function BookingPage() {
   const [slotsError, setSlotsError] = useState('');
 
   // Fetch doctors on mount
-  // NOTE: If RLS blocks anon read on users table, falls back to backend API
   useEffect(() => {
     if (!user) return;
     
     const fetchDoctors = async () => {
       try {
-        console.log('Fetching doctors from Supabase...');
-        const { data, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('role', 'doctor');
-
-        if (error) {
-          console.error('Supabase doctor fetch error:', error);
-          throw error;
-        }
-
-        console.log('Doctors from Supabase:', data);
-
-        if (data && data.length > 0) {
-          setDoctors(data);
+        setDoctorsLoading(true);
+        console.log('Fetching doctors from backend API...');
+        const res = await authFetch('/doctors');
+        console.log('Doctors from backend API:', res);
+        
+        if (res.success && res.doctors) {
+          setDoctors(res.doctors);
         } else {
-          // No data returned — likely RLS is blocking anon read access
-          // Fall back to backend API which uses service_role key
-          console.log('No doctors from Supabase (possible RLS block), trying backend API...');
-          try {
-            const res = await authFetch('/doctors');
-            console.log('Doctors from backend API:', res);
-            if (res.doctors && res.doctors.length > 0) {
-              setDoctors(res.doctors);
-            } else {
-              console.warn('No doctors found in database. Ensure users with role="doctor" exist.');
-              setDoctors([]);
-            }
-          } catch (apiErr) {
-            console.error('Backend doctor fetch error:', apiErr);
-            setDoctors([]);
-          }
+          console.warn('No doctors found or success=false:', res);
+          setDoctors([]);
         }
       } catch (err) {
         console.error('Fetch doctors error:', err);
-        // Try backend API as fallback
-        try {
-          const res = await authFetch('/doctors');
-          if (res.doctors && res.doctors.length > 0) {
-            setDoctors(res.doctors);
-          }
-        } catch (apiErr) {
-          console.error('Backend fallback also failed:', apiErr);
-        }
+        setDoctors([]);
       } finally {
         setDoctorsLoading(false);
       }
     };
     fetchDoctors();
-  }, [authFetch]);
+  }, [authFetch, user]);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
   const selectService = (value) => setFormData({ ...formData, service: value });
@@ -119,7 +87,7 @@ export default function BookingPage() {
     return new Date(dateStr).toISOString().split('T')[0];
   };
 
-  // Fetch booked slots directly from Supabase whenever date changes
+  // Fetch booked slots via backend API whenever date changes
   const fetchBookedSlots = useCallback(async (date) => {
     if (!date) {
       setBookedSlots([]);
@@ -130,17 +98,14 @@ export default function BookingPage() {
     setSlotsLoading(true);
     setSlotsError('');
     try {
-      const { data, error } = await supabase
-        .from('appointments')
-        .select('time')
-        .eq('date', formattedDate)
-        .neq('status', 'Rejected');
-
-      if (error) throw error;
-
-      const slots = (data || []).map(item => item.time).filter(Boolean);
-      console.log('Booked slots found:', slots);
-      setBookedSlots(slots);
+      const res = await authFetch(`/appointments/booked-slots?date=${formattedDate}`);
+      console.log('Booked slots response:', res);
+      
+      if (res.success) {
+        setBookedSlots(res.bookedSlots || []);
+      } else {
+        throw new Error(res.message || 'Failed to fetch slots');
+      }
     } catch (err) {
       console.error('Fetch booked slots error:', err);
       setSlotsError('Could not check slot availability');
@@ -148,7 +113,7 @@ export default function BookingPage() {
     } finally {
       setSlotsLoading(false);
     }
-  }, []);
+  }, [authFetch]);
 
   // When date changes, fetch booked slots and clear selected time
   const handleDateChange = (e) => {

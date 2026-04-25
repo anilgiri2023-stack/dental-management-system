@@ -77,15 +77,29 @@ export default function Navbar() {
             {isAuthenticated ? (
               <>
                 <Link
-                  to="/dashboard"
+                  to={
+                    user?.role === 'admin'
+                      ? '/admin/dashboard'
+                      : user?.role === 'doctor'
+                      ? '/doctor'
+                      : '/patient'
+                  }
                   className="inline-flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-primary px-4 py-2.5 rounded-full hover:bg-primary-50 transition-all duration-300"
                 >
                   <LayoutDashboard className="w-4 h-4" />
                   Dashboard
                 </Link>
                 <div className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 px-3 py-2">
-                  <div className="w-7 h-7 bg-primary-50 rounded-full flex items-center justify-center">
-                    <User className="w-3.5 h-3.5 text-primary" />
+                  <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center bg-primary-50 shrink-0">
+                    {user?.avatar_url ? (
+                      <img
+                        src={user.avatar_url}
+                        alt={displayName}
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
+                      />
+                    ) : null}
+                    <User className={`w-3.5 h-3.5 text-primary ${user?.avatar_url ? 'hidden' : ''}`} />
                   </div>
                   <span className="text-gray-700">{displayName}</span>
                 </div>
@@ -134,10 +148,10 @@ export default function Navbar() {
               </div>
             )}
             <Link
-              to={isAuthenticated ? "/dashboard/book" : "/login"}
+              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/patient/book") : "/login"}
               className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5"
             >
-              Book Appointment
+              {isAuthenticated && (user?.role === 'doctor' || user?.role === 'admin') ? "Go to Dashboard" : "Book Appointment"}
             </Link>
           </div>
 
@@ -176,7 +190,13 @@ export default function Navbar() {
             {isAuthenticated ? (
               <>
                 <Link
-                  to="/dashboard"
+                  to={
+                    user?.role === 'admin'
+                      ? '/admin/dashboard'
+                      : user?.role === 'doctor'
+                      ? '/doctor'
+                      : '/patient'
+                  }
                   className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
                 >
                   <span className="inline-flex items-center gap-2">
@@ -185,7 +205,13 @@ export default function Navbar() {
                   </span>
                 </Link>
                 <div className="px-4 py-3 text-sm font-medium text-gray-700 flex items-center gap-2">
-                  <User className="w-4 h-4 text-primary" />
+                  <div className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-primary-50 shrink-0">
+                    {user?.avatar_url ? (
+                      <img src={user.avatar_url} alt={displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      <User className="w-3.5 h-3.5 text-primary" />
+                    )}
+                  </div>
                   {displayName}
                 </div>
                 <button
@@ -223,7 +249,7 @@ export default function Navbar() {
             )}
 
             <Link
-              to={isAuthenticated ? "/dashboard/book" : "/login"}
+              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/patient/book") : "/login"}
               className="block text-center bg-primary text-white px-6 py-3 rounded-xl text-sm font-semibold mt-3 hover:bg-primary-dark transition-colors"
             >
               Book Appointment

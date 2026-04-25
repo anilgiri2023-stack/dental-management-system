@@ -2,7 +2,10 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function UserProtectedRoute({ children }) {
-  const { isAuthenticated, isAdminLoggedIn, loading } = useAuth();
+  const { user, isAuthenticated, isAdminLoggedIn, loading } = useAuth();
+
+  // Debug logs
+  console.log('🛡️ UserProtectedRoute:', { user, isAuthenticated, isAdminLoggedIn, loading });
 
   if (loading) {
     return (
@@ -17,13 +20,22 @@ export default function UserProtectedRoute({ children }) {
 
   // Not logged in → go to login
   if (!isAuthenticated) {
+    console.log('🛡️ UserProtectedRoute: Not authenticated, redirecting to /login');
     return <Navigate to="/login" replace />;
   }
 
   // Admin trying to access user pages → redirect to admin dashboard
   if (isAdminLoggedIn) {
+    console.log('🛡️ UserProtectedRoute: Admin detected, redirecting to /admin/dashboard');
     return <Navigate to="/admin/dashboard" replace />;
   }
 
+  // Doctor trying to access user pages → redirect to doctor dashboard
+  if (user?.role === 'doctor') {
+    console.log('🛡️ UserProtectedRoute: Doctor detected, redirecting to /doctor');
+    return <Navigate to="/doctor" replace />;
+  }
+
+  console.log('🛡️ UserProtectedRoute: Access granted for user', user?.email);
   return children;
 }

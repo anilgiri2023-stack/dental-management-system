@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import { Sparkles, ArrowRight, ShieldCheck, ArrowLeft, Loader2, Stethoscope, EyeOff, Eye } from 'lucide-react';
 import Logo from '../components/Logo';
 import { apiFetch } from '../utils/api';
-import { supabase } from '../utils/supabase';
 
 export default function DoctorLoginPage() {
   const [email, setEmail] = useState('');
@@ -20,9 +19,9 @@ export default function DoctorLoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      if (user?.role === 'doctor') navigate('/doctor/dashboard');
+      if (user?.role === 'doctor') navigate('/doctor');
       else if (user?.role === 'admin') navigate('/admin/dashboard');
-      else navigate('/dashboard');
+      else navigate('/patient');
     }
   }, [isAuthenticated, user, navigate]);
 
@@ -33,7 +32,7 @@ export default function DoctorLoginPage() {
 
     try {
       await doctorLogin(email, password);
-      navigate('/doctor/dashboard');
+      navigate('/doctor');
     } catch (err) {
       setError(err.message || 'Invalid doctor credentials');
     } finally {

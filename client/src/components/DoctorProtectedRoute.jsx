@@ -1,58 +1,13 @@
-import { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import supabase from '../utils/supabase';
 
 export default function DoctorProtectedRoute({ children }) {
-  const { isAuthenticated, user, loading: authLoading } = useAuth();
-  const [isVerified, setIsVerified] = useState(false);
-  const [roleLoading, setRoleLoading] = useState(true);
-  const [shouldRedirectLogin, setShouldRedirectLogin] = useState(false);
-  const [shouldRedirectHome, setShouldRedirectHome] = useState(false);
+  const { isAuthenticated, user, loading } = useAuth();
 
-  useEffect(() => {
-    // If auth is still loading, wait
-    if (authLoading) return;
+  // Debug logs
+  console.log('🩺 DoctorProtectedRoute:', { user, isAuthenticated, loading });
 
-    // Not logged in → redirect to /login
-    if (!isAuthenticated || !user?.id) {
-      setShouldRedirectLogin(true);
-      setRoleLoading(false);
-      return;
-    }
-
-    // Fetch user role from Supabase
-    const verifyRole = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-
-        if (error || !data) {
-          throw new Error('Failed to fetch role');
-        }
-
-        // if role !== "doctor" → redirect to / (home)
-        if (data.role !== 'doctor') {
-          setShouldRedirectHome(true);
-        } else {
-          // else → allow access
-          setIsVerified(true);
-        }
-      } catch (err) {
-        console.error('Role verification failed:', err);
-        setShouldRedirectHome(true);
-      } finally {
-        setRoleLoading(false);
-      }
-    };
-
-    verifyRole();
-  }, [authLoading, isAuthenticated, user]);
-
-  if (authLoading || roleLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -63,13 +18,18 @@ export default function DoctorProtectedRoute({ children }) {
     );
   }
 
-  if (shouldRedirectLogin) {
-    return <Navigate to="/login" replace />;
+  // Not logged in → redirect to /login
+  if (!isAuthenticated || !user?.id) {
+    console.log('🩺 DoctorProtectedRoute: Not authenticated, redirecting to /login/doctor');
+    return <Navigate to="/login/doctor" replace />;
   }
 
-  if (shouldRedirectHome) {
+  // Not a doctor → redirect to home
+  if (user.role !== 'doctor') {
+    console.log('🩺 DoctorProtectedRoute: Not a doctor (role:', user.role, '), redirecting to /');
     return <Navigate to="/" replace />;
   }
 
-  return isVerified ? children : null;
+  console.log('🩺 DoctorProtectedRoute: Access granted for doctor', user.email);
+  return children;
 }

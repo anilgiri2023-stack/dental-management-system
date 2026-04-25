@@ -32,7 +32,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (isAuthenticated) {
       if (isAdminLoggedIn) navigate('/admin/dashboard');
-      else if (user?.role === 'doctor') navigate('/doctor/dashboard');
+      else if (user?.role === 'doctor') navigate('/doctor');
       else navigate('/dashboard');
     }
   }, [isAuthenticated, isAdminLoggedIn, user, navigate]);
@@ -121,7 +121,7 @@ export default function LoginPage() {
         isNewUser ? phone.trim() : undefined
       );
       setSuccess('Verification successful! Redirecting...');
-      const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor/dashboard' : '/dashboard';
+      const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor' : '/dashboard';
       setTimeout(() => navigate(dest), 800);
     } catch (err) {
       setError(err.message);
@@ -146,7 +146,7 @@ export default function LoginPage() {
         verifyOtp(identifier.trim(), 'email', otpStr, isNewUser ? name.trim() : undefined, isNewUser ? phone.trim() : undefined)
           .then((result) => {
             setSuccess('Verification successful! Redirecting...');
-            const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor/dashboard' : '/dashboard';
+            const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor' : '/dashboard';
             setTimeout(() => navigate(dest), 800);
           })
           .catch(err => { setError(err.message); setOtp(Array(OTP_LENGTH).fill('')); setTimeout(() => otpRefs.current[0]?.focus(), 100); })

@@ -6,6 +6,7 @@ import {
   CheckCircle2, XCircle, AlertCircle, Stethoscope, ArrowRight,
   RefreshCw, Edit3, Check, X, FileText, Download, Filter,
 } from 'lucide-react';
+import PatientReports from '../components/PatientReports';
 
 const STATUS_CONFIG = {
   Pending: { color: 'bg-amber-50 text-amber-700 border-amber-200', icon: AlertCircle, label: 'Pending' },
@@ -197,36 +198,7 @@ export default function UserDashboard() {
           </div>
         ) : activeTab === 'reports' ? (
           /* Reports Tab */
-          reports.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-20 h-20 bg-primary-50 rounded-3xl flex items-center justify-center mx-auto mb-6"><FileText className="w-10 h-10 text-primary" /></div>
-              <h3 className="text-xl font-bold text-gray-800 mb-2">No Reports Yet</h3>
-              <p className="text-gray-500 text-sm">Your doctor hasn't uploaded any reports yet.</p>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {reports.map(r => (
-                <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6 hover:shadow-md transition-all">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-12 h-12 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
-                        <FileText className="w-6 h-6 text-primary" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-900 truncate">{r.file_name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor_name || 'Doctor'}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                        {r.notes && <p className="text-xs text-gray-500 mt-1 italic">{r.notes}</p>}
-                      </div>
-                    </div>
-                    <a href={r.file_url} target="_blank" rel="noopener noreferrer" download className="inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-dark transition-all shrink-0">
-                      <Download className="w-4 h-4" /> Download
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
+          <PatientReports reports={reports} />
         ) : (
           /* Appointments Tab */
           filteredAppointments.length === 0 ? (

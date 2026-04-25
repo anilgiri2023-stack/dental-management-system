@@ -55,7 +55,7 @@ function App() {
           <Route path="/services" element={<PublicLayout><ServicesPage /></PublicLayout>} />
           <Route path="/doctors" element={<PublicLayout><DoctorsPage /></PublicLayout>} />
           <Route path="/gallery" element={<PublicLayout><GalleryPage /></PublicLayout>} />
-          <Route path="/book" element={<Navigate to="/dashboard/book" replace />} />
+          <Route path="/book" element={<Navigate to="/patient/book" replace />} />
 
           {/* Auth Routes (no Navbar/Footer) */}
           <Route path="/login" element={<Navigate to="/login/patient" replace />} />
@@ -67,7 +67,7 @@ function App() {
 
           {/* User dashboard (protected, no Navbar/Footer — has its own header) */}
           <Route
-            path="/dashboard"
+            path="/patient"
             element={
               <UserProtectedRoute>
                 <UserDashboard />
@@ -75,17 +75,18 @@ function App() {
             }
           />
           <Route
-            path="/dashboard/book"
+            path="/patient/book"
             element={
               <UserProtectedRoute>
                 <BookingPage />
               </UserProtectedRoute>
             }
           />
+          <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
 
           {/* Doctor dashboard (protected, no Navbar/Footer) */}
           <Route
-            path="/doctor/dashboard"
+            path="/doctor"
             element={
               <DoctorProtectedRoute>
                 <DoctorDashboard />

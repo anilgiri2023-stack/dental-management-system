@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
 import Logo from '../components/Logo';
-import { supabase } from '../utils/supabase';
+import { apiFetch } from '../utils/api';
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
@@ -42,15 +42,16 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'http://localhost:5173/reset-password',
+      const data = await apiFetch('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
       });
 
-      if (error) {
-        setError(error.message);
-      } else {
+      if (data.success) {
         console.log("Reset email sent to:", email);
-        setSuccessMsg("Check your inbox or spam folder");
+        setSuccessMsg(data.message || "Check your inbox or spam folder");
+      } else {
+        setError(data.message || 'Failed to send reset link.');
       }
     } catch (err) {
       console.error(err);
