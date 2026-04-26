@@ -5,7 +5,6 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const path = require('path');
@@ -14,9 +13,10 @@ const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
 
-dotenv.config(); // Must be called before local imports
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first");
 
-const { sendEmail } = require('./services/emailService');
+dotenv.config(); // Must be called before local imports
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,17 +32,8 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-// ─── Nodemailer ──────────────────────────────────────────
-console.log("EMAIL:", process.env.SMTP_USER);
-console.log("PASS:", process.env.SMTP_PASS);
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// Supabase is now the single source of truth for all emails.
+// Custom Nodemailer has been removed.
 
 // ─── JWT ─────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
@@ -50,17 +41,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
 function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
-
-// ─── OTP Store (in-memory) ───────────────────────────────
-const otpStore = new Map();
-const OTP_EXPIRY = 5 * 60 * 1000; // 5 minutes
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of otpStore.entries()) {
-    if (now > val.expiresAt) otpStore.delete(key);
-  }
-}, 60_000);
 
 // ─── Auth Middleware ─────────────────────────────────────
 function authMiddleware(req, res, next) {
@@ -113,50 +93,29 @@ const upload = multer({
 });
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /send-otp
+// 1. POST /send-otp (Migrated to Supabase)
 // ═══════════════════════════════════════════════════════════
 app.post('/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    // Rate limit: 1 OTP per 60s per email
-    const existing = otpStore.get(email);
-    if (existing && Date.now() - existing.createdAt < 60_000) {
-      return res.status(429).json({ success: false, message: 'Wait 60 seconds before requesting again' });
+    console.log(`📨 Triggering Supabase OTP for: ${email}`);
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim().toLowerCase(),
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: 'https://dental-management-system-sand.vercel.app/'
+      }
+    });
+
+    if (error) {
+      console.error('❌ Supabase signInWithOtp error:', error.message);
+      return res.status(400).json({ success: false, message: error.message });
     }
 
-    const otp = crypto.randomInt(100000, 999999).toString();
-    otpStore.set(email, { otp, expiresAt: Date.now() + OTP_EXPIRY, createdAt: Date.now(), attempts: 0 });
-
-    console.log(`📨 OTP for ${email}: ${otp}`);
-
-    // Send email
-    try {
-      await transporter.sendMail({
-        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-        to: email,
-        subject: 'Your Login Code — Clinical Serenity',
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-            <div style="text-align:center;margin-bottom:30px">
-              <h1 style="color:#0f172a;font-size:22px;margin:0">Clinical Serenity</h1>
-            </div>
-            <p style="color:#475569;font-size:15px;margin-bottom:24px">Your verification code (expires in 5 minutes):</p>
-            <div style="background:#f0fdfa;border:2px dashed #0D9488;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px">
-              <span style="font-size:36px;font-weight:800;letter-spacing:8px;color:#0D9488">${otp}</span>
-            </div>
-            <p style="color:#94a3b8;font-size:13px">If you didn't request this, ignore this email.</p>
-          </div>
-        `,
-      });
-      console.log(`✅ OTP email sent to ${email}`);
-    } catch (emailErr) {
-      console.error('⚠️  Email send failed:', emailErr.message);
-      // OTP is still stored — user can use it even if email fails
-    }
-
-    res.json({ success: true, message: `Verification code sent to ${email}` });
+    res.json({ success: true, message: `Verification code sent by Supabase to ${email}` });
   } catch (error) {
     console.error('Send OTP error:', error);
     res.status(500).json({ success: false, message: 'Failed to send OTP' });
@@ -174,125 +133,85 @@ app.post('/api/auth/send-otp', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 2. POST /verify-otp
+// 2. POST /verify-otp (Migrated to Supabase)
 // ═══════════════════════════════════════════════════════════
 app.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp, name, phone } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
-    const stored = otpStore.get(email);
-    if (!stored) return res.status(400).json({ success: false, message: 'No OTP found. Request a new one.' });
-    if (Date.now() > stored.expiresAt) { otpStore.delete(email); return res.status(400).json({ success: false, message: 'OTP expired' }); }
-    if (stored.attempts >= 5) { otpStore.delete(email); return res.status(429).json({ success: false, message: 'Too many attempts' }); }
-    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ success: false, message: `Wrong OTP. ${5 - stored.attempts} tries left` }); }
+    console.log(`🔑 Verifying Supabase OTP for: ${email}`);
 
-    // OTP correct — clear it
-    otpStore.delete(email);
+    // Verify OTP with Supabase
+    const { data: authData, error: authErr } = await supabase.auth.verifyOtp({
+      email: email.trim().toLowerCase(),
+      token: otp,
+      type: 'email'
+    });
 
-    // ─── Session & DB query with retry ───
-    console.log('🔐 OTP verified for:', email);
-    console.log('🔍 Attempting to query users table...');
+    if (authErr) {
+      console.error('❌ Supabase verifyOtp error:', authErr.message);
+      return res.status(400).json({ success: false, message: authErr.message });
+    }
 
-    // Helper: query users table with a single retry on permission error
-    async function queryUsersTable(email, attempt = 1) {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .single();
+    const authUser = authData.user;
+    const sessionToken = authData.session?.access_token;
 
-      if (error) {
-        console.error(`❌ Users table query failed (attempt ${attempt}):`, error.message, '| Code:', error.code);
-        // Retry once after a short delay (session propagation)
-        if (attempt === 1 && (error.message.includes('permission denied') || error.code === '42501')) {
-          console.log('⏳ Retrying users query in 1 second...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          return queryUsersTable(email, 2);
-        }
-        // If still failing after retry, it's a config issue
-        if (error.message.includes('permission denied') || error.code === '42501') {
-          console.error('🚨 CRITICAL: Service role key may be wrong. Server is using anon key instead of service_role key.');
-          console.error('🚨 Fix: Update SUPABASE_SERVICE_ROLE_KEY in .env with the real service_role key from Supabase Dashboard → Settings → API');
-          throw new Error('Login failed, retry OTP');
-        }
-        // PGRST116 = no rows found, that's OK (new user)
-        if (error.code === 'PGRST116') return null;
-        throw error;
-      }
-
-      console.log('✅ Session valid — user query successful');
-      console.log('👤 User found:', { id: data?.id, email: data?.email, role: data?.role });
-      return data;
+    if (!authUser || !sessionToken) {
+      return res.status(401).json({ success: false, message: 'Session failed. Please try again.' });
     }
 
     // Find or create user in "users" table
-    let user;
-    try {
-      user = await queryUsersTable(email);
-    } catch (queryError) {
-      console.error('❌ Failed to query users table:', queryError.message);
-      return res.status(500).json({ success: false, message: queryError.message || 'Login failed, retry OTP' });
-    }
+    const { data: existingUser, error: fetchErr } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email.trim().toLowerCase())
+      .single();
 
-    if (user) {
-      console.log(`✅ Existing user: ${user.id}`);
-      // Update name/phone if provided and different
+    let user;
+    if (existingUser) {
+      user = existingUser;
+      // Update name/phone if provided
       let updates = {};
       if (name && user.name !== name) updates.name = name;
       if (phone && user.phone !== phone) updates.phone = phone;
 
       if (Object.keys(updates).length > 0) {
-        const { data: updatedUser, error: updateErr } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
-        if (updateErr) {
-          console.error('⚠️ User update failed:', updateErr.message);
-        } else if (updatedUser) {
-          user = updatedUser;
-        }
+        const { data: updatedUser } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
+        if (updatedUser) user = updatedUser;
       }
     } else {
-      // Validate required fields for new user
-      if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Name is required' });
-      if (!phone || !phone.trim()) return res.status(400).json({ success: false, message: 'Phone is required' });
-
-      // Create new user
+      // Create new user in public.users linked to auth user ID
       const { data: newUser, error: createErr } = await supabase
         .from('users')
         .insert([{ 
-           email, 
-           name: name.trim(), 
-           phone: phone.trim(),
+           id: authUser.id,
+           email: email.trim().toLowerCase(), 
+           name: name || 'User', 
+           phone: phone || 'N/A',
            role: 'user' 
         }])
         .select()
         .single();
 
       if (createErr) {
-        console.error('❌ Create user error:', createErr.message, '| Code:', createErr.code);
-        if (createErr.message.includes('permission denied') || createErr.code === '42501') {
-          return res.status(500).json({ success: false, message: 'Login failed, retry OTP' });
-        }
-        return res.status(400).json({ success: false, message: createErr.message || 'Failed to create user' });
+        console.error('❌ Create user error:', createErr.message);
+        return res.status(500).json({ success: false, message: 'Failed to create user profile' });
       }
       user = newUser;
-      console.log(`✅ New user created: ${user.id}`);
     }
 
-    // Generate JWT
+    // Generate app-specific JWT (consistent with existing logic)
     const token = signToken({
       id: user.id,
       email: user.email,
-      name: user.name,
-      phone: user.phone,
       role: user.role || 'user',
     });
-
-    console.log('🎫 JWT issued for:', { id: user.id, email: user.email, role: user.role });
 
     res.json({
       success: true,
       message: 'Login successful',
-      token,
+      token, // This is the JWT our app uses
       user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: user.role || 'user' },
     });
   } catch (error) {
@@ -514,40 +433,8 @@ async function bookAppointment(req, res) {
       return res.status(500).json({ success: false, message: error.message });
     }
 
-    // ─── Email Logic ───
-    if (email) {
-      try {
-        let doctorName = 'Doctor';
-        if (doctor_id) {
-          const { data: docData } = await supabase.from('users').select('name').eq('id', doctor_id).single();
-          if (docData && docData.name) {
-            doctorName = docData.name;
-          }
-        }
-        
-        const dateTime = `${date} ${time}`;
-        
-        console.log("Email function triggered");
-        
-        try {
-          await transporter.sendMail({
-            from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-            to: email,
-            subject: "Appointment Confirmation",
-            html: `
-              <h3>Appointment Confirmed</h3>
-              <p>You booked an appointment with <b>Dr. ${doctorName}</b></p>
-              <p>Date & Time: ${dateTime}</p>
-            `
-          });
-          console.log("Email sent");
-        } catch (err) {
-          console.error("Email error:", err);
-        }
-      } catch (err) {
-        console.error('Error fetching doctor details for email:', err);
-      }
-    }
+    // Custom email notification removed. Supabase handles core auth emails.
+    // Manual appointment confirmation emails are disabled to prevent SMTP timeouts.
 
     console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${userId}]`);
     res.status(201).json({ success: true, message: 'Appointment booked', appointment: data });
@@ -705,49 +592,7 @@ async function updateStatus(req, res) {
     if (updateErr) throw updateErr;
     console.log(`✅ Appointment ${appointmentId} → ${status}`);
 
-    // Get user email for notification
-    const { data: aptUser } = await supabase
-      .from('users')
-      .select('email')
-      .eq('id', apt.user_id)
-      .single();
-
-    const userEmail = aptUser?.email;
-    if (userEmail) {
-      try {
-        const statusEmoji = status === 'Approved' ? '✅' : status === 'Rejected' ? '❌' : '⏳';
-        const statusColor = status === 'Approved' ? '#10b981' : status === 'Rejected' ? '#ef4444' : '#f59e0b';
-        const svc = { cleaning:'Professional Cleaning', rootcanal:'Root Canal', implants:'Dental Implants', braces:'Braces', whitening:'Teeth Whitening', cosmetic:'Cosmetic Dentistry', extraction:'Tooth Extraction', pediatric:'Pediatric Dentistry' };
-
-        await transporter.sendMail({
-          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-          to: userEmail,
-          subject: `${statusEmoji} Appointment ${status} — Clinical Serenity`,
-          html: `
-            <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-              <h1 style="color:#0f172a;font-size:22px;margin:0 0 24px;text-align:center">Clinical Serenity</h1>
-              <p style="color:#475569;font-size:15px">Your appointment status has been updated:</p>
-              <div style="background:#f8fafc;border-radius:12px;padding:20px;margin:16px 0">
-                <table style="width:100%;border-collapse:collapse">
-                  <tr><td style="padding:8px 0;color:#94a3b8;font-size:13px">Service</td><td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right">${svc[apt.service] || apt.service}</td></tr>
-                  <tr><td style="padding:8px 0;color:#94a3b8;font-size:13px">Date</td><td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right">${new Date(apt.date).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</td></tr>
-                  <tr><td style="padding:8px 0;color:#94a3b8;font-size:13px">Time</td><td style="padding:8px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right">${apt.time || 'N/A'}</td></tr>
-                  <tr><td style="padding:8px 0;color:#94a3b8;font-size:13px">Status</td><td style="padding:8px 0;text-align:right"><span style="background:${statusColor}15;color:${statusColor};border:1px solid ${statusColor}30;padding:4px 14px;border-radius:20px;font-size:13px;font-weight:700">${statusEmoji} ${status}</span></td></tr>
-                </table>
-              </div>
-              ${status === 'Approved' ? '<p style="color:#10b981;background:#ecfdf5;padding:14px;border-radius:10px;border-left:4px solid #10b981">🎉 Your appointment is confirmed!</p>' : ''}
-              ${status === 'Rejected' ? '<p style="color:#ef4444;background:#fef2f2;padding:14px;border-radius:10px;border-left:4px solid #ef4444">Your appointment could not be accommodated. Please reschedule.</p>' : ''}
-            </div>
-          `,
-        });
-        console.log(`📧 Notification sent to ${userEmail}`);
-        return res.json({ success: true, message: `Appointment ${status}. Email sent to ${userEmail}.` });
-      } catch (emailErr) {
-        console.error('Email failed:', emailErr.message);
-      }
-    }
-
-    res.json({ success: true, message: `Appointment ${status}.` });
+    res.json({ success: true, message: `Appointment status updated to ${status}.` });
   } catch (error) {
     console.error('Update status error:', error);
     res.status(500).json({ success: false, message: 'Failed to update status' });
@@ -781,33 +626,7 @@ app.patch('/api/doctor/appointments/:id/status', authMiddleware, doctorOnly, asy
       .from('appointments').update({ status }).eq('id', appointmentId);
     if (updateErr) throw updateErr;
 
-    // ─── Email Logic ───
-    const patientEmail = apt.email || apt.patient_email; // Handle potential schema variations
-    console.log("STATUS:", status);
-    console.log("EMAIL:", patientEmail);
-
-    if (patientEmail && status !== 'Pending') {
-      try {
-        const doctorName = req.user.name || 'Doctor';
-        const formattedDate = new Date(apt.date).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-        
-        await transporter.sendMail({
-          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-          to: patientEmail,
-          subject: "Appointment Status Update",
-          html: `
-            <h3>Appointment Update</h3>
-            <p>Your appointment with <b>Dr. ${doctorName}</b></p>
-            <p>Date & Time: ${formattedDate} ${apt.time || ''}</p>
-            <p>Status: <b>${status}</b></p>
-          `
-        });
-      } catch (emailErr) {
-        console.error('Email error:', emailErr);
-      }
-    } else {
-      console.log(`⚠️ No email sent for appointment ${appointmentId}. Status: ${status}`);
-    }
+    // Custom status update emails removed.
 
     console.log(`🩺 Doctor ${req.user.id} updated appointment ${appointmentId} → ${status}`);
     res.json({ success: true, message: `Appointment ${status}` });
@@ -907,10 +726,16 @@ app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    
+    if (error) {
+      console.error('❌ Supabase error fetching users:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
     res.json({ success: true, users: data || [] });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to fetch users' });
+  } catch (err) {
+    console.error('❌ Server error fetching users:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -924,77 +749,37 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
       return res.status(400).json({ success: false, message: 'Email and name are required' });
     }
 
-    // 1. Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email.trim().toLowerCase())
-      .single();
-
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'User with this email already exists' });
-    }
-
-    // 2. Generate invite link via Supabase Auth Admin API
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: 'invite',
-      email: email.trim().toLowerCase(),
-      options: {
+    // 1. Invite user via Supabase Auth Admin API (sends fresh email every time)
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+      email.trim().toLowerCase(),
+      {
         data: { name: name.trim(), role: 'doctor' },
-        redirectTo: 'http://localhost:5173/set-password'
+        redirectTo: 'https://dental-management-system-sand.vercel.app/set-password'
       }
-    });
-
-    if (linkError) {
-      console.error('GENERATE LINK FAILED — Invite error:', linkError);
-      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate invite link' });
+    );
+    
+    if (inviteError) {
+      console.error('INVITE FAILED:', inviteError);
+      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invitation' });
     }
 
-    const actionLink = linkData.properties?.action_link;
-    const authUser = linkData.user;
+    const authUser = inviteData.user;
+    console.log('✅ Supabase invitation sent/refreshed for:', email);
 
-    // 3. Send email via Nodemailer
-    try {
-      await transporter.sendMail({
-        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-        to: email.trim().toLowerCase(),
-        subject: 'Doctor Invitation — Clinical Serenity',
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
-            <p style="color:#475569;font-size:15px">Hi Dr. ${name},</p>
-            <p style="color:#475569;font-size:15px">You have been invited to join Clinical Serenity as a Doctor.</p>
-            <div style="text-align:center;margin:30px 0;">
-              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Accept Invitation & Set Password</a>
-            </div>
-            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
-          </div>
-        `
-      });
-      console.log('EMAIL SENT SUCCESS — Doctor invited:', email);
-    } catch (emailErr) {
-      console.error('EMAIL SEND FAILED:', emailErr);
-      // We still created the user in auth, maybe we shouldn't insert to public.users?
-      // Actually we should fail the request if email fails so they can retry.
-      // But user is already in auth... Let's delete them from auth if email fails
-      await supabase.auth.admin.deleteUser(authUser.id);
-      return res.status(500).json({ success: false, message: 'Failed to send invite email. Please try again.' });
-    }
-
-    // 4. Insert into public.users table
-    const { error: insertError } = await supabase
+    // 2. Upsert into public.users table (allows re-inviting)
+    const { error: upsertError } = await supabase
       .from('users')
-      .insert([{
+      .upsert({
         id: authUser.id,
         email: email.trim().toLowerCase(),
         name: name.trim(),
         role: 'doctor',
         phone: 'N/A'
-      }]);
+      }, { onConflict: 'id' });
 
-    if (insertError) {
-      console.error('INSERT USER FAILED — error:', insertError);
-      return res.status(500).json({ success: false, message: 'Invited, but failed to save to database' });
+    if (upsertError) {
+      console.error('UPSERT USER FAILED:', upsertError);
+      return res.status(500).json({ success: false, message: 'Invited, but failed to sync to database' });
     }
 
     res.json({ success: true, message: 'Doctor invited successfully. Email sent to ' + email });
@@ -1014,41 +799,35 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
       return res.status(400).json({ success: false, message: 'Email and name are required' });
     }
 
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: 'invite',
-      email: email.trim().toLowerCase(),
-      options: {
+    // 1. Invite user via Supabase Auth Admin API
+    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+      email.trim().toLowerCase(),
+      {
         data: { name: name.trim(), role: 'admin' },
-        redirectTo: 'http://localhost:5173/set-password'
+        redirectTo: 'https://dental-management-system-sand.vercel.app/set-password'
       }
-    });
+    );
 
-    if (linkError) {
-      return res.status(500).json({ success: false, message: linkError.message || 'Failed to generate invite link' });
+    if (inviteError) {
+      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invitation' });
     }
 
-    const actionLink = linkData.properties?.action_link;
+    const authUser = inviteData.user;
 
-    try {
-      await transporter.sendMail({
-        from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-        to: email.trim().toLowerCase(),
-        subject: 'Admin Invitation — Clinical Serenity',
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-            <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
-            <p style="color:#475569;font-size:15px">Hi ${name},</p>
-            <p style="color:#475569;font-size:15px">You have been invited to join Clinical Serenity as an Administrator.</p>
-            <div style="text-align:center;margin:30px 0;">
-              <a href="${actionLink}" style="background:#0D9488;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block;">Accept Invitation & Set Password</a>
-            </div>
-            <p style="color:#94a3b8;font-size:13px;word-break:break-all;">If the button doesn't work, copy this link: <br/>${actionLink}</p>
-          </div>
-        `
-      });
-    } catch (emailErr) {
-      await supabase.auth.admin.deleteUser(linkData.user.id);
-      return res.status(500).json({ success: false, message: 'Failed to send invite email. Please try again.' });
+    // 2. Upsert into public.users table
+    const { error: upsertError } = await supabase
+      .from('users')
+      .upsert({
+        id: authUser.id,
+        email: email.trim().toLowerCase(),
+        name: name.trim(),
+        role: 'admin',
+        phone: 'N/A'
+      }, { onConflict: 'id' });
+
+    if (upsertError) {
+      console.error('UPSERT ADMIN FAILED:', upsertError);
+      return res.status(500).json({ success: false, message: 'Admin invited, but failed to sync to database' });
     }
 
     res.json({ success: true, message: 'Admin invited successfully. Email sent to ' + email });
@@ -1197,7 +976,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     // Use Supabase built-in reset password functionality as requested
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-      redirectTo: 'http://localhost:5173/reset-password',
+      redirectTo: 'https://dental-management-system-sand.vercel.app/reset-password',
     });
 
     if (error) {
@@ -1248,7 +1027,7 @@ app.post('/api/auth/complete-reset-password', async (req, res) => {
       email: user.email,
       name: user.user_metadata?.name || 'Admin User',
       role: user.user_metadata?.role === 'admin' ? 'admin' : (user.user_metadata?.role || 'admin')
-    });
+    }, { onConflict: 'id' });
 
     if (updateDbErr) {
       console.error('❌ Reset password — public.users upsert failed:', updateDbErr.message);
@@ -1796,34 +1575,7 @@ cron.schedule('0 8 * * *', async () => {
 
     console.log(`📧 Found ${(apts || []).length} appointment(s) for tomorrow (${tomorrowStr})`);
 
-    for (const apt of (apts || [])) {
-      const email = apt.email || apt.users?.email;
-      if (!email) continue;
-
-      try {
-        await transporter.sendMail({
-          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-          to: email,
-          subject: '📅 Appointment Reminder — Clinical Serenity',
-          html: `
-            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:40px 30px;background:#fff;border-radius:16px;border:1px solid #e2e8f0">
-              <h1 style="color:#0f172a;font-size:22px;text-align:center;margin:0 0 20px">Clinical Serenity</h1>
-              <p style="color:#475569;font-size:15px">Hi ${apt.name || 'Patient'},</p>
-              <p style="color:#475569;font-size:15px">This is a reminder that you have an appointment <strong>tomorrow</strong>:</p>
-              <div style="background:#f0fdfa;border:2px solid #0D9488;border-radius:12px;padding:20px;margin:16px 0">
-                <p style="margin:4px 0;color:#0f172a"><strong>Service:</strong> ${apt.service}</p>
-                <p style="margin:4px 0;color:#0f172a"><strong>Date:</strong> ${tomorrowStr}</p>
-                <p style="margin:4px 0;color:#0f172a"><strong>Time:</strong> ${apt.time || 'TBD'}</p>
-              </div>
-              <p style="color:#94a3b8;font-size:13px">If you need to reschedule, please contact us.</p>
-            </div>
-          `,
-        });
-        console.log(`✅ Reminder sent to ${email}`);
-      } catch (emailErr) {
-        console.error(`❌ Reminder failed for ${email}:`, emailErr.message);
-      }
-    }
+      // Manual reminder emails disabled.
   } catch (err) {
     console.error('Reminder cron error:', err);
   }
@@ -1836,36 +1588,7 @@ app.listen(PORT, async () => {
   console.log(`🚀 Clinical Serenity API — Port ${PORT}`);
   console.log('═══════════════════════════════════════════');
 
-  // ─── Validate service role key ───
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!serviceKey || serviceKey === 'PASTE_YOUR_REAL_SERVICE_ROLE_KEY_HERE') {
-    console.error('');
-    console.error('🚨🚨🚨 CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not set!');
-    console.error('   Go to Supabase Dashboard → Settings → API → service_role (secret)');
-    console.error('   Paste it into server/.env as SUPABASE_SERVICE_ROLE_KEY=<key>');
-    console.error('   Without this, ALL database queries will fail with "permission denied"');
-    console.error('');
-  } else {
-    // Decode the JWT to check if it's actually the anon key
-    try {
-      const payload = JSON.parse(Buffer.from(serviceKey.split('.')[1], 'base64').toString());
-      if (payload.role === 'anon') {
-        console.error('');
-        console.error('🚨🚨🚨 CRITICAL: SUPABASE_SERVICE_ROLE_KEY contains the ANON key, not the service_role key!');
-        console.error('   Current key role:', payload.role);
-        console.error('   Go to Supabase Dashboard → Settings → API → service_role (secret)');
-        console.error('   Replace the key in server/.env — it must have role "service_role"');
-        console.error('   This is why you get "permission denied" on the users table!');
-        console.error('');
-      } else {
-        console.log(`✅ Supabase key role: ${payload.role}`);
-      }
-    } catch (e) {
-      console.warn('⚠️  Could not decode service role key to verify role');
-    }
-  }
 
-  // Verify database
   try {
     const { error: uErr } = await supabase.from('users').select('id').limit(1);
     console.log(uErr ? `❌ users table: ${uErr.message}` : '✅ users table OK');
@@ -1891,10 +1614,6 @@ app.listen(PORT, async () => {
     console.error('❌ DB check failed:', e.message);
   }
 
-  // Verify SMTP
-  transporter.verify((err) => {
-    console.log(err ? `⚠️  SMTP: ${err.message}` : '✅ SMTP ready');
-  });
 
   console.log('');
   console.log('📋 Routes:');

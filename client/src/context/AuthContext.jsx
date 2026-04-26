@@ -196,6 +196,45 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const [isAuthFlow, setIsAuthFlow] = useState(false);
+
+  useEffect(() => {
+    const checkAuthFlow = () => {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      const path = window.location.pathname;
+      
+      const params = new URLSearchParams(hash.substring(1));
+      const queryParams = new URLSearchParams(search);
+      
+      const type = params.get('type') || queryParams.get('type');
+      const hasToken = hash.includes('access_token') || search.includes('token=');
+      const hasErrorCode = hash.includes('error=') || search.includes('error=');
+      const isAuthPage = path === '/set-password' || path === '/reset-password';
+      
+      const active = hasToken || type === 'invite' || type === 'recovery' || hasErrorCode || isAuthPage;
+      
+      if (active !== isAuthFlow) {
+        console.log('🛡️ AuthContext: Auth flow detected!', { active, path, type, hasToken });
+        setIsAuthFlow(active);
+      }
+    };
+
+    // Initial check
+    checkAuthFlow();
+
+    // Listen for hash changes and pushState/replaceState
+    window.addEventListener('hashchange', checkAuthFlow);
+    
+    // Intercept navigation (popstate)
+    window.addEventListener('popstate', checkAuthFlow);
+
+    return () => {
+      window.removeEventListener('hashchange', checkAuthFlow);
+      window.removeEventListener('popstate', checkAuthFlow);
+    };
+  }, [isAuthFlow]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -215,6 +254,7 @@ export function AuthProvider({ children }) {
         adminLogout,
         updateProfile,
         authFetch,
+        isAuthFlow,
       }}
     >
       {children}

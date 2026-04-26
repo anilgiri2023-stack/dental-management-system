@@ -15,16 +15,16 @@ export default function DoctorLoginPage() {
   const [cooldown, setCooldown] = useState(0);
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
 
-  const { doctorLogin, isAuthenticated, user } = useAuth();
+  const { doctorLogin, isAuthenticated, user, isAuthFlow } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isAuthFlow) {
       if (user?.role === 'doctor') navigate('/doctor');
       else if (user?.role === 'admin') navigate('/admin/dashboard');
       else navigate('/patient');
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, user, navigate, isAuthFlow]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -27,16 +27,16 @@ export default function PatientLoginPage() {
   const [resendTimer, setResendTimer] = useState(0);
 
   const otpRefs = useRef([]);
-  const { sendOtp, verifyOtp, isAuthenticated, isAdminLoggedIn, user } = useAuth();
+  const { sendOtp, verifyOtp, isAuthenticated, isAdminLoggedIn, user, isAuthFlow } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isAuthFlow) {
       if (isAdminLoggedIn) navigate('/admin/dashboard');
       else if (user?.role === 'doctor') navigate('/doctor');
       else navigate('/patient');
     }
-  }, [isAuthenticated, isAdminLoggedIn, user, navigate]);
+  }, [isAuthenticated, isAdminLoggedIn, user, navigate, isAuthFlow]);
 
   useEffect(() => {
     if (resendTimer > 0) {

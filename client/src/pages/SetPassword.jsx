@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '../utils/api';
 import { supabase } from '../utils/supabase';
+import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 export default function SetPassword() {
+  const { setUser } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [accessToken, setAccessToken] = useState('');
   const [sessionReady, setSessionReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [success, setSuccess] = useState(false);
@@ -20,46 +21,79 @@ export default function SetPassword() {
   useEffect(() => {
     const handleAuthSession = async () => {
       try {
-        console.log("FULL URL:", window.location.href);
         const hash = window.location.hash;
-        console.log("HASH:", hash);
+        const search = window.location.search;
         
-        if (hash && hash.includes('access_token')) {
-          const params = new URLSearchParams(hash.substring(1));
-          const access_token = params.get("access_token");
-          console.log("TOKEN:", access_token);
+        console.log("🛠️ SetPassword Debug Info:");
+        console.log("   URL:", window.location.href);
+        console.log("   Path:", window.location.pathname);
+        console.log("   Hash length:", hash.length);
+        console.log("   Query length:", search.length);
+        console.log("   Hash content detected:", hash ? "YES" : "NO");
+        console.log("   Query content detected:", search ? "YES" : "NO");
+        
+        const hashParams = new URLSearchParams(hash.substring(1));
+        const queryParams = new URLSearchParams(search);
 
-          if (!access_token) {
-            setError('No invite token found. Please use the link in your email.');
+        // Extract tokens from either hash or query
+        const access_token = hashParams.get("access_token") || queryParams.get("token");
+        const refresh_token = hashParams.get("refresh_token");
+        const type = hashParams.get("type") || queryParams.get("type");
+        const error_code = hashParams.get("error") || queryParams.get("error");
+        const error_desc = hashParams.get("error_description") || queryParams.get("error_description");
+
+        console.log("   Extracted token:", access_token ? "PRESENT" : "MISSING");
+        console.log("   Extracted type:", type);
+
+        if (hash || search) {
+          // 1. Handle error cases first (e.g. access_denied, otp_expired)
+          if (error_code || error_desc) {
+            console.error("❌ Auth error detected:", error_code, error_desc);
+            if (error_code === 'access_denied' || error_desc?.includes('expired') || error_code?.includes('expired')) {
+              setError('Invite link expired. Please request a new invite.');
+            } else {
+              setError(error_desc || 'Authentication failed. Please try again.');
+            }
             setInitializing(false);
             return;
           }
 
-          // Set Supabase session so auth.getUser works on backend
+          // 2. Validate mandatory tokens
+          if (!access_token) {
+            console.warn("⚠️ No access_token found in hash or search");
+            // If there's no token but we had a hash/search, it might be a malformed link
+            setError('No valid invitation token found. Please use the link in your email.');
+            setInitializing(false);
+            return;
+          }
+
+          // 3. Force initialize session in Supabase SDK
+          console.log("🔄 Initializing session with Supabase SDK...");
           const { error: sessionErr } = await supabase.auth.setSession({
             access_token,
-            refresh_token: access_token
+            refresh_token: refresh_token || access_token // fallback
           });
 
           if (sessionErr) {
-            console.error("Session set error:", sessionErr);
-            setError('Verification failed. Your link may be expired.');
+            console.error("❌ setSession error:", sessionErr);
+            setError('Invite link expired. Please request a new invite.');
             setInitializing(false);
             return;
           }
 
-          setAccessToken(access_token);
+          console.log("✅ Session initialized for flow:", type);
           setSessionReady(true);
-          // Clean URL hash
+          
+          // 4. Clean URL to keep it tidy
           window.history.replaceState(null, '', window.location.pathname);
           setInitializing(false);
         } else {
-          setError('No invite token found. Please use the link in your email.');
+          setError('No invitation link detected. Please check your email.');
           setInitializing(false);
         }
       } catch (err) {
-        console.error('Auth session error:', err);
-        setError('Something went wrong verifying your invite. Please try again or request a new invitation.');
+        console.error('💥 SetPassword initialization failed:', err);
+        setError('Something went wrong. Please try clicking the link in your email again.');
         setInitializing(false);
       }
     };
@@ -82,27 +116,37 @@ export default function SetPassword() {
 
     setLoading(true);
     try {
-      const data = await apiFetch('/auth/complete-reset-password', {
-        method: 'POST',
-        body: JSON.stringify({
-          password,
-          access_token: accessToken
-        })
+      // Use Supabase SDK directly as requested
+      const { data, error: updateErr } = await supabase.auth.updateUser({ 
+        password: password 
       });
 
-      if (!data.success) {
-        throw new Error(data.message || 'Failed to set password');
+      if (updateErr) {
+        throw new Error(updateErr.message || 'Failed to set password');
+      }
+
+      // Sync with app's auth context
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          localStorage.setItem('cs_token', session.access_token);
+          // Fetch user info from our backend to get the correct role
+          const userData = await apiFetch('/auth/me');
+          if (userData && userData.user) {
+            setUser(userData.user);
+            localStorage.setItem('cs_user', JSON.stringify(userData.user));
+          }
+        }
+      } catch (syncErr) {
+        console.error('Auth sync error:', syncErr);
+        // We still proceed to success state as the password was set
       }
 
       setSuccess(true);
       
-      // Redirect based on role
+      // Redirect to dashboard as requested
       setTimeout(() => {
-        if (data.role === 'admin') {
-          navigate('/admin/dashboard');
-        } else {
-          navigate('/login/doctor');
-        }
+        navigate('/dashboard');
       }, 2500);
     } catch (err) {
       console.error('Set password error:', err);
@@ -133,7 +177,7 @@ export default function SetPassword() {
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Password Set Successfully!</h2>
-          <p className="text-slate-600">Redirecting to login...</p>
+          <p className="text-slate-600">Redirecting to your dashboard...</p>
         </div>
       </div>
     );
