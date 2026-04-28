@@ -29,9 +29,51 @@ app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 // ─── Supabase (Service Role — bypasses RLS) ──────────────
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_KEY;
+const SERVICE_ROLE_KEY_SOURCE = process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? 'SUPABASE_SERVICE_ROLE_KEY'
+  : process.env.SERVICE_ROLE_KEY
+    ? 'SERVICE_ROLE_KEY'
+    : process.env.SUPABASE_SERVICE_KEY
+      ? 'SUPABASE_SERVICE_KEY'
+      : null;
+
+function getSupabaseProjectRef(url) {
+  try {
+    return new URL(url).hostname.split('.')[0];
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+function getJwtRole(token) {
+  try {
+    const payload = token.split('.')[1];
+    const decoded = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    return JSON.parse(decoded).role || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
+console.log('SUPABASE_PROJECT_REF:', SUPABASE_URL ? getSupabaseProjectRef(SUPABASE_URL) : 'MISSING');
+console.log('SUPABASE_KEY_SOURCE:', SERVICE_ROLE_KEY_SOURCE || 'MISSING');
+console.log('SUPABASE_KEY_ROLE:', SERVICE_ROLE_KEY ? getJwtRole(SERVICE_ROLE_KEY) : 'MISSING');
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  console.error('Missing Supabase env vars. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SERVICE_ROLE_KEY) in Vercel.');
+} else if (getJwtRole(SERVICE_ROLE_KEY) !== 'service_role') {
+  console.error('Supabase backend key is not service_role. Replace it with the Supabase service role key in Vercel.');
+}
+
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_URL,
+  SERVICE_ROLE_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
@@ -426,9 +468,97 @@ app.post('/api/auth/update-profile', authMiddleware, (req, res) => {
   res.json({ success: true, token });
 });
 
+function redactSensitiveRows(rows) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map(({ password, password_hash, passwordHash, ...safeRow }) => ({
+    ...safeRow,
+    ...(password ? { password: '[REDACTED]' } : {}),
+    ...(password_hash ? { password_hash: '[REDACTED]' } : {}),
+    ...(passwordHash ? { passwordHash: '[REDACTED]' } : {})
+  }));
+}
+
+async function validatePassword(plainPassword, storedPassword) {
+  if (!storedPassword) return false;
+
+  if (storedPassword.startsWith('$2')) {
+    return bcrypt.compare(plainPassword, storedPassword);
+  }
+
+  return storedPassword === plainPassword;
+}
+
+// GET /api/test-admin — temporary DB connectivity check for the admins table
+app.get('/api/test-admin', async (req, res) => {
+  try {
+    const result = await supabase.from('admins').select('*');
+
+    console.log('TEST_ADMIN_DATA:', redactSensitiveRows(result.data));
+    console.log('TEST_ADMIN_ERROR:', result.error);
+
+    res.status(result.error ? 500 : 200).json({
+      ...result,
+      data: redactSensitiveRows(result.data)
+    });
+  } catch (error) {
+    console.error('TEST_ADMIN_EXCEPTION:', error);
+    res.status(500).json({ data: null, error: { message: error.message } });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════
 // Unified Authentication Logic (Requirement #1 & #7)
 // ═══════════════════════════════════════════════════════════
+async function handleAdminLogin(req, res) {
+  try {
+    let { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email and password required' });
+    }
+
+    email = email.trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from('admins')
+      .select('*')
+      .ilike('email', email);
+
+    console.log('EMAIL:', email);
+    console.log('DATA:', redactSensitiveRows(data));
+    console.log('ERROR:', error);
+
+    if (error) {
+      return res.status(500).json({ success: false, message: error.message || 'Failed to fetch admin account' });
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, message: 'Account not found. Please contact support.' });
+    }
+
+    const admin = data[0];
+    const storedPassword = admin.password || admin.password_hash || admin.passwordHash;
+    const isMatch = await validatePassword(password, storedPassword);
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Incorrect password.' });
+    }
+
+    const adminUser = {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name || admin.full_name || admin.email,
+      role: 'admin',
+      avatar_url: admin.avatar_url || null
+    };
+
+    const token = signToken(adminUser);
+    res.json({ success: true, token, user: adminUser });
+  } catch (err) {
+    console.error('🔥 Admin login error:', err.message);
+    res.status(500).json({ success: false, message: 'Internal server error during login' });
+  }
+}
+
 async function handleLogin(req, res, targetRole) {
   try {
     const { email, password } = req.body;
@@ -437,15 +567,20 @@ async function handleLogin(req, res, targetRole) {
     const trimmedEmail = email.trim().toLowerCase();
     
     // 1. Fetch user
-    const { data: user, error: dbError } = await supabase
+    const { data, error: dbError } = await supabase
       .from('users')
       .select('*')
-      .eq('email', trimmedEmail)
-      .single();
+      .ilike('email', trimmedEmail);
 
-    if (dbError || !user) {
-      return res.status(401).json({ success: false, message: 'Account not found. Please contact support.' });
+    if (dbError) {
+      return res.status(500).json({ success: false, message: dbError.message || 'Failed to fetch account' });
     }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ success: false, message: 'Account not found. Please contact support.' });
+    }
+
+    const user = data[0];
 
     if (user.role !== targetRole && targetRole !== 'any') {
       return res.status(403).json({ success: false, message: `Access denied: This account is not a ${targetRole}.` });
@@ -462,12 +597,7 @@ async function handleLogin(req, res, targetRole) {
     // 3. Bcrypt Comparison (Requirement #1)
     let isMatch = false;
     try {
-      if (user.password && user.password.startsWith('$2')) {
-        isMatch = await bcrypt.compare(password, user.password);
-      } else if (user.password) {
-        // Fallback for legacy plain-text
-        isMatch = user.password === password;
-      }
+      isMatch = await validatePassword(password, user.password);
     } catch (err) {
       console.error('Bcrypt comparison failed:', err.message);
       isMatch = false;
@@ -491,7 +621,7 @@ async function handleLogin(req, res, targetRole) {
   }
 }
 
-app.post('/api/admin/login', (req, res) => handleLogin(req, res, 'admin'));
+app.post('/api/admin/login', handleAdminLogin);
 app.post('/api/doctor/login', (req, res) => handleLogin(req, res, 'doctor'));
 
 // ═══════════════════════════════════════════════════════════
@@ -1928,6 +2058,7 @@ app.listen(PORT, async () => {
   console.log('📋 Routes:');
   console.log('  POST /send-otp');
   console.log('  POST /verify-otp');
+  console.log('  GET  /api/test-admin');
   console.log('  POST /book-appointment');
   console.log('  GET  /my-appointments');
   console.log('  GET  /all-appointments       (admin)');
