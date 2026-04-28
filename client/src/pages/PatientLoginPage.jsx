@@ -25,6 +25,7 @@ export default function PatientLoginPage() {
   const [loading, setLoading] = useState(false);
   const [checkingUser, setCheckingUser] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [loginCooldown, setLoginCooldown] = useState(0);
 
   const otpRefs = useRef([]);
   const { sendOtp, verifyOtp, isAuthenticated, isAdminLoggedIn, user, isAuthFlow } = useAuth();
@@ -45,9 +46,20 @@ export default function PatientLoginPage() {
     }
   }, [resendTimer]);
 
+  useEffect(() => {
+    if (loginCooldown > 0) {
+      const timer = setTimeout(() => setLoginCooldown(loginCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [loginCooldown]);
+
   // Step 1: Check if email exists, then route accordingly
   const handleEmailSubmit = async (e) => {
     e.preventDefault();
+    if (loginCooldown > 0) {
+      setError(`Please wait ${loginCooldown}s before trying again.`);
+      return;
+    }
     setError('');
     setSuccess('');
     if (!identifier.trim()) { setError('Please enter your email'); return; }
@@ -63,12 +75,27 @@ export default function PatientLoginPage() {
         // Existing user → send OTP directly, skip name/phone
         setIsNewUser(false);
         setLoading(true);
-        await sendOtp(identifier.trim(), 'email');
-        setStep('otp');
-        setOtp(Array(OTP_LENGTH).fill(''));
-        setResendTimer(RESEND_COOLDOWN);
-        setSuccess(`Welcome back! Code sent to ${identifier}`);
-        setTimeout(() => otpRefs.current[0]?.focus(), 100);
+        try {
+          await sendOtp(identifier.trim(), 'email');
+          setStep('otp');
+          setOtp(Array(OTP_LENGTH).fill(''));
+          setResendTimer(RESEND_COOLDOWN);
+          setLoginCooldown(RESEND_COOLDOWN);
+          setSuccess(`Welcome back! Code sent to ${identifier}`);
+          setTimeout(() => otpRefs.current[0]?.focus(), 100);
+        } catch (otpErr) {
+          const isRateLimit = 
+            otpErr.status === 429 || 
+            otpErr.message.toLowerCase().includes('rate limit') || 
+            otpErr.message.toLowerCase().includes('too many');
+
+          if (isRateLimit) {
+            setError(otpErr.message || 'Too many attempts. Please wait 60 seconds.');
+            setLoginCooldown(RESEND_COOLDOWN);
+          } else {
+            setError(otpErr.message);
+          }
+        }
       } else {
         // New user → show name + phone fields
         setIsNewUser(true);
@@ -85,6 +112,10 @@ export default function PatientLoginPage() {
   // Step 2 (new users): Collect name + phone, then send OTP
   const handleDetailsSubmit = async (e) => {
     e.preventDefault();
+    if (loginCooldown > 0) {
+      setError(`Please wait ${loginCooldown}s before trying again.`);
+      return;
+    }
     setError('');
     setSuccess('');
     if (!name.trim()) { setError('Please enter your full name'); return; }
@@ -96,10 +127,21 @@ export default function PatientLoginPage() {
       setStep('otp');
       setOtp(Array(OTP_LENGTH).fill(''));
       setResendTimer(RESEND_COOLDOWN);
+      setLoginCooldown(RESEND_COOLDOWN);
       setSuccess(`Verification code sent to ${identifier}`);
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } catch (err) {
-      setError(err.message);
+      const isRateLimit = 
+        err.status === 429 || 
+        err.message.toLowerCase().includes('rate limit') || 
+        err.message.toLowerCase().includes('too many');
+
+      if (isRateLimit) {
+        setError(err.message || 'Too many attempts. Please wait 60 seconds.');
+        setLoginCooldown(RESEND_COOLDOWN);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -178,7 +220,19 @@ export default function PatientLoginPage() {
       setOtp(Array(OTP_LENGTH).fill(''));
       setSuccess('New verification code sent!');
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
-    } catch (err) { setError(err.message); }
+    } catch (err) { 
+      const isRateLimit = 
+        err.status === 429 || 
+        err.message.toLowerCase().includes('rate limit') || 
+        err.message.toLowerCase().includes('too many');
+
+      if (isRateLimit) {
+        setError(err.message || 'Too many attempts. Please wait 60 seconds.');
+        setLoginCooldown(RESEND_COOLDOWN);
+      } else {
+        setError(err.message); 
+      }
+    }
     finally { setLoading(false); }
   };
 
@@ -218,9 +272,10 @@ export default function PatientLoginPage() {
                       placeholder="you@example.com" required autoFocus
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300" />
                   </div>
-                  <button type="submit" id="check-email-btn" disabled={checkingUser}
+                  <button type="submit" id="check-email-btn" disabled={checkingUser || loginCooldown > 0}
                     className="w-full inline-flex items-center justify-center gap-2 bg-primary text-white py-3.5 rounded-xl font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-60 disabled:cursor-not-allowed group">
                     {checkingUser ? (<><Loader2 className="w-5 h-5 animate-spin" /> Checking...</>)
+                      : loginCooldown > 0 ? (<>Wait {loginCooldown}s</>)
                       : (<>Continue <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" /></>)}
                   </button>
                 </form>
@@ -260,9 +315,10 @@ export default function PatientLoginPage() {
                       placeholder="10-digit mobile number" pattern="[0-9]{10}" maxLength="10" required
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary focus:bg-white transition-all placeholder:text-gray-300" />
                   </div>
-                  <button type="submit" id="send-otp-btn" disabled={loading}
+                  <button type="submit" id="send-otp-btn" disabled={loading || loginCooldown > 0}
                     className="w-full inline-flex items-center justify-center gap-2 bg-primary text-white py-3.5 rounded-xl font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-60 disabled:cursor-not-allowed group">
                     {loading ? (<><Loader2 className="w-5 h-5 animate-spin" /> Sending code...</>)
+                      : loginCooldown > 0 ? (<>Wait {loginCooldown}s</>)
                       : (<>Send Verification Code <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" /></>)}
                   </button>
                 </form>

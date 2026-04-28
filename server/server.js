@@ -18,6 +18,8 @@ dns.setDefaultResultOrder("ipv4first");
 
 dotenv.config(); // Must be called before local imports
 
+const { sendEmail } = require('./services/emailService');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -34,6 +36,14 @@ const supabase = createClient(
 
 // Supabase is now the single source of truth for all emails.
 // Custom Nodemailer has been removed.
+
+// Simple in-memory throttle to prevent hitting Supabase rate limits too hard
+const otpThrottle = new Map();
+const THROTTLE_WINDOW = 30000; // 30 seconds
+
+// Fallback OTP storage for when Supabase SMTP fails
+const manualOtps = new Map();
+const MANUAL_OTP_EXPIRY = 10 * 60 * 1000; // 10 minutes
 
 // ─── JWT ─────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
@@ -102,8 +112,24 @@ app.post('/send-otp', async (req, res) => {
 
     console.log(`📨 Triggering Supabase OTP for: ${email}`);
 
+    const emailKey = email.trim().toLowerCase();
+    const now = Date.now();
+    
+    // Check local throttle
+    if (otpThrottle.has(emailKey)) {
+      const lastSent = otpThrottle.get(emailKey);
+      if (now - lastSent < THROTTLE_WINDOW) {
+        const waitTime = Math.ceil((THROTTLE_WINDOW - (now - lastSent)) / 1000);
+        return res.status(429).json({
+          success: false,
+          message: `Please wait ${waitTime} seconds before requesting another code.`,
+          error_code: 'rate_limit_exceeded'
+        });
+      }
+    }
+
     const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
+      email: emailKey,
       options: {
         shouldCreateUser: true,
         emailRedirectTo: 'https://dental-management-system-sand.vercel.app/'
@@ -112,8 +138,55 @@ app.post('/send-otp', async (req, res) => {
 
     if (error) {
       console.error('❌ Supabase signInWithOtp error:', error.message);
-      return res.status(400).json({ success: false, message: error.message });
+      
+      const isRateLimit = 
+        error.status === 429 || 
+        error.message.toLowerCase().includes('rate limit') || 
+        error.message.toLowerCase().includes('too many') ||
+        error.message.toLowerCase().includes('limit exceeded');
+
+      if (isRateLimit) {
+        // Also update local throttle on external rate limit
+        otpThrottle.set(emailKey, now);
+        return res.status(429).json({ 
+          success: false, 
+          message: 'Email rate limit exceeded. Please wait a few minutes before trying again.',
+          error_code: 'rate_limit_exceeded'
+        });
+      }
+
+      // Fallback to manual Gmail send for ANY other error (SMTP, Project settings, etc.)
+      // as long as we have Gmail credentials configured.
+      if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        console.log(`⚠️ Supabase Auth failed: "${error.message}". Attempting manual Gmail fallback...`);
+        
+        // Generate a random 6-digit code
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Save to manual store
+        manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
+
+        // Send via Gmail
+        const emailSent = await sendEmail(
+          emailKey,
+          "Your Verification Code - Clinical Serenity",
+          `Welcome to Clinical Serenity! Your verification code is: ${code}\n\nThis code will expire in 10 minutes.`
+        );
+
+        if (emailSent) {
+          otpThrottle.set(emailKey, now);
+          return res.json({ 
+            success: true, 
+            message: `Verification code sent via fallback system to ${emailKey}` 
+          });
+        }
+      }
+
+      return res.status(error.status || 400).json({ success: false, message: error.message });
     }
+
+    // Success -> Update throttle
+    otpThrottle.set(emailKey, now);
 
     res.json({ success: true, message: `Verification code sent by Supabase to ${email}` });
   } catch (error) {
@@ -141,23 +214,51 @@ app.post('/verify-otp', async (req, res) => {
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
     console.log(`🔑 Verifying Supabase OTP for: ${email}`);
+    const emailKey = email.trim().toLowerCase();
 
-    // Verify OTP with Supabase
-    const { data: authData, error: authErr } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: otp,
-      type: 'email'
-    });
+    // 1. Check Manual Fallback Store first
+    let authUser = null;
+    if (manualOtps.has(emailKey)) {
+      const record = manualOtps.get(emailKey);
+      if (Date.now() < record.expires && record.code === otp) {
+        console.log(`✅ Manual OTP match for: ${emailKey}`);
+        
+        // Find or create user in Supabase Auth via Admin API
+        const { data: users, error: listErr } = await supabase.auth.admin.listUsers();
+        let targetAuthUser = (users?.users || []).find(u => u.email === emailKey);
 
-    if (authErr) {
-      console.error('❌ Supabase verifyOtp error:', authErr.message);
-      return res.status(400).json({ success: false, message: authErr.message });
+        if (!targetAuthUser) {
+          console.log(`🆕 Creating new auth user for: ${emailKey}`);
+          const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
+            email: emailKey,
+            email_confirm: true,
+            user_metadata: { name: name || 'User' }
+          });
+          if (createErr) throw createErr;
+          targetAuthUser = newUser.user;
+        }
+
+        authUser = targetAuthUser;
+        manualOtps.delete(emailKey); // Cleanup
+      }
     }
 
-    const authUser = authData.user;
-    const sessionToken = authData.session?.access_token;
+    // 2. If no manual match, verify with Supabase
+    if (!authUser) {
+      const { data: authData, error: authErr } = await supabase.auth.verifyOtp({
+        email: emailKey,
+        token: otp,
+        type: 'email'
+      });
 
-    if (!authUser || !sessionToken) {
+      if (authErr) {
+        console.error('❌ Supabase verifyOtp error:', authErr.message);
+        return res.status(400).json({ success: false, message: authErr.message });
+      }
+      authUser = authData.user;
+    }
+
+    if (!authUser) {
       return res.status(401).json({ success: false, message: 'Session failed. Please try again.' });
     }
 
@@ -165,7 +266,7 @@ app.post('/verify-otp', async (req, res) => {
     const { data: existingUser, error: fetchErr } = await supabase
       .from('users')
       .select('*')
-      .eq('email', email.trim().toLowerCase())
+      .eq('email', emailKey)
       .single();
 
     let user;
