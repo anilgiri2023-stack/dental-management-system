@@ -1,18 +1,19 @@
 // Central API utility
 const configuredApiUrl = import.meta.env.VITE_API_URL;
-const devApiUrl = 'http://localhost:5000/api';
-const productionFallbackApiUrl = '/api';
 
 function normalizeApiUrl(url) {
-  return url.replace(/\/+$/, '');
+  return (url || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
 }
 
-export const API_BASE_URL = normalizeApiUrl(
-  configuredApiUrl || (import.meta.env.DEV ? devApiUrl : productionFallbackApiUrl)
-);
+export const API_BASE_URL = normalizeApiUrl(configuredApiUrl);
 
-if (!configuredApiUrl && import.meta.env.PROD) {
-  console.warn('VITE_API_URL is not set. Falling back to same-origin /api.');
+function apiUrl(endpoint) {
+  const path = endpoint.startsWith('/api/') ? endpoint : `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  return `${API_BASE_URL}${path}`;
+}
+
+if (!configuredApiUrl) {
+  console.warn('VITE_API_URL is not set. API requests will use same-origin /api.');
 }
 
 export const apiFetch = async (endpoint, options = {}) => {
@@ -35,7 +36,7 @@ export const apiFetch = async (endpoint, options = {}) => {
 
   let res;
   try {
-    res = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+    res = await fetch(apiUrl(endpoint), { ...options, headers });
   } catch (err) {
     console.error('API Fetch Network Error:', err);
     throw new Error('Unable to connect to the server. Please try again later.');
@@ -74,7 +75,7 @@ export const uploadFetch = async (endpoint, formData) => {
 
   let res;
   try {
-    res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    res = await fetch(apiUrl(endpoint), {
       method: 'POST',
       headers,
       body: formData,

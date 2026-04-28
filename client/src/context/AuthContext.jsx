@@ -143,7 +143,7 @@ export function AuthProvider({ children }) {
     if (process.env.NODE_ENV === 'development') {
       console.log('🔐 Admin login attempt...');
     }
-    const data = await apiFetch('/admin/login', {
+    const data = await apiFetch('/api/admin/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -159,7 +159,7 @@ export function AuthProvider({ children }) {
   // ─── Doctor Auth ───
   const doctorLogin = async (email, password) => {
     console.log('🩺 Doctor login attempt...');
-    const data = await apiFetch('/doctor/login', {
+    const data = await apiFetch('/api/doctor/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
