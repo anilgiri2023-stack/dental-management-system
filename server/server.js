@@ -110,12 +110,12 @@ app.post('/send-otp', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    console.log(`📨 Triggering Supabase OTP for: ${email}`);
+    console.log(`📨 Triggering OTP process for: ${email}`);
 
     const emailKey = email.trim().toLowerCase();
     const now = Date.now();
     
-    // Check local throttle
+    // 1. Check local throttle
     if (otpThrottle.has(emailKey)) {
       const lastSent = otpThrottle.get(emailKey);
       if (now - lastSent < THROTTLE_WINDOW) {
@@ -128,7 +128,9 @@ app.post('/send-otp', async (req, res) => {
       }
     }
 
-    const { error } = await supabase.auth.signInWithOtp({
+    // 2. Attempt Supabase Auth (if enabled/configured)
+    console.log('  -> Attempting Supabase Auth...');
+    const { error: supabaseError } = await supabase.auth.signInWithOtp({
       email: emailKey,
       options: {
         shouldCreateUser: true,
@@ -136,37 +138,21 @@ app.post('/send-otp', async (req, res) => {
       }
     });
 
-    if (error) {
-      console.error('❌ Supabase signInWithOtp error:', error.message);
-      
-      const isRateLimit = 
-        error.status === 429 || 
-        error.message.toLowerCase().includes('rate limit') || 
-        error.message.toLowerCase().includes('too many') ||
-        error.message.toLowerCase().includes('limit exceeded');
+    // 3. Handle Supabase success
+    if (!supabaseError) {
+      console.log('✅ Supabase Auth sent OTP successfully');
+      otpThrottle.set(emailKey, now);
+      return res.json({ success: true, message: `Verification code sent by Supabase to ${email}` });
+    }
 
-      if (isRateLimit) {
-        // Also update local throttle on external rate limit
-        otpThrottle.set(emailKey, now);
-        return res.status(429).json({ 
-          success: false, 
-          message: 'Email rate limit exceeded. Please wait a few minutes before trying again.',
-          error_code: 'rate_limit_exceeded'
-        });
-      }
-
-      // Fallback to manual Gmail send for ANY other error (SMTP, Project settings, etc.)
-      // as long as we have Gmail credentials configured.
-      if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-        console.log(`⚠️ Supabase Auth failed: "${error.message}". Attempting manual Gmail fallback...`);
-        
-        // Generate a random 6-digit code
+    // 4. Fallback to Manual Email if Supabase fails or is disabled
+    console.log(`⚠️ Supabase Auth error: "${supabaseError.message}". Using fallback...`);
+    
+    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // Save to manual store
         manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
 
-        // Send via Gmail
         const emailSent = await sendEmail(
           emailKey,
           "Your Verification Code - Clinical Serenity",
@@ -174,24 +160,38 @@ app.post('/send-otp', async (req, res) => {
         );
 
         if (emailSent) {
+          console.log(`✅ Fallback email sent successfully to ${emailKey}`);
           otpThrottle.set(emailKey, now);
           return res.json({ 
             success: true, 
-            message: `Verification code sent via fallback system to ${emailKey}` 
+            message: `Verification code sent via backup system to ${emailKey}` 
+          });
+        } else {
+          console.error(`❌ Fallback email failed for ${emailKey}`);
+          return res.status(500).json({ 
+            success: false, 
+            message: 'Email delivery failed. Please check your SMTP configuration or try again later.' 
           });
         }
+      } catch (fallbackErr) {
+        console.error(`❌ Critical fallback error:`, fallbackErr.message);
+        return res.status(500).json({ success: false, message: 'Internal fallback error: ' + fallbackErr.message });
       }
-
-      return res.status(error.status || 400).json({ success: false, message: error.message });
     }
 
-    // Success -> Update throttle
-    otpThrottle.set(emailKey, now);
+    // 5. If no fallback configured and Supabase failed
+    return res.status(supabaseError.status || 400).json({ 
+      success: false, 
+      message: `Failed to send verification code: ${supabaseError.message}` 
+    });
 
-    res.json({ success: true, message: `Verification code sent by Supabase to ${email}` });
   } catch (error) {
-    console.error('Send OTP error:', error);
-    res.status(500).json({ success: false, message: 'Failed to send OTP' });
+    console.error('🔥 CRITICAL ERROR in /send-otp:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: `Server Error: ${error.message || 'Internal failure'}`,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 

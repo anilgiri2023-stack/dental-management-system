@@ -80,7 +80,7 @@ export default function LoginPage() {
           setOtp(Array(OTP_LENGTH).fill(''));
           setResendTimer(RESEND_COOLDOWN);
           setLoginCooldown(RESEND_COOLDOWN);
-          setSuccess(`Welcome back! Code sent to ${identifier}`);
+          setSuccess(result.message || `Welcome back! Code sent to ${identifier}`);
           setTimeout(() => otpRefs.current[0]?.focus(), 100);
         } catch (otpErr) {
           const isRateLimit = 
@@ -127,7 +127,7 @@ export default function LoginPage() {
       setOtp(Array(OTP_LENGTH).fill(''));
       setResendTimer(RESEND_COOLDOWN);
       setLoginCooldown(RESEND_COOLDOWN);
-      setSuccess(`Verification code sent to ${identifier}`);
+      setSuccess(result.message || `Verification code sent to ${identifier}`);
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } catch (err) {
       const isRateLimit = 
