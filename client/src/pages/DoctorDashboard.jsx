@@ -163,7 +163,7 @@ function AppointmentCard({ apt, highlight, reports, onUpload, onEdit, onDelete, 
 // Main Dashboard
 // ═══════════════════════════════════════
 export default function DoctorDashboard() {
-  const { user, setUser, logout, authFetch } = useAuth();
+  const { user, token, setUser, logout, authFetch } = useAuth();
   const navigate = useNavigate();
   const displayName = user?.name || user?.email?.split('@')[0] || 'Doctor';
 
@@ -267,13 +267,27 @@ export default function DoctorDashboard() {
   // ─── Status change: optimistic UI with rollback ───
   const handleStatusChange = async (aptId, newStatus) => {
     const prevAppointments = [...appointments];
+    const appointment = appointments.find(a => a.id === aptId);
+    const apiOrigin = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
     // Optimistic update
     setAppointments(prev => prev.map(a => a.id === aptId ? { ...a, status: newStatus } : a));
     try {
-      await authFetch(`/doctor/appointments/${aptId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: newStatus }),
+      const res = await fetch(`${apiOrigin}/api/appointment/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          appointmentId: aptId,
+          status: newStatus.toLowerCase(),
+          patientEmail: appointment?.email || '',
+        }),
       });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to update status');
+
       setSuccessMsg(`Status updated to ${newStatus}`);
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {

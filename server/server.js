@@ -13,6 +13,7 @@ const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
@@ -23,6 +24,16 @@ const { sendEmail } = require('./services/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(cors({ origin: '*' }));
@@ -938,6 +949,76 @@ async function updateStatus(req, res) {
 app.put('/update-status', authMiddleware, adminOnly, updateStatus);
 app.patch('/api/appointments/:id/status', authMiddleware, adminOnly, updateStatus);
 app.put('/api/update-status', authMiddleware, adminOnly, updateStatus);
+
+// PUT /api/appointment/status — doctor/admin updates status and notifies patient
+app.put('/api/appointment/status', authMiddleware, async (req, res) => {
+  try {
+    if (!['doctor', 'admin'].includes(req.user?.role)) {
+      return res.status(403).json({ success: false, message: 'Doctor or admin only' });
+    }
+
+    const { appointmentId, status, patientEmail } = req.body;
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    const statusMap = {
+      approved: 'Approved',
+      rejected: 'Rejected',
+    };
+    const dbStatus = statusMap[normalizedStatus];
+
+    if (!appointmentId) {
+      return res.status(400).json({ success: false, message: 'appointmentId is required' });
+    }
+
+    if (!dbStatus) {
+      return res.status(400).json({ success: false, message: 'status must be approved or rejected' });
+    }
+
+    const { data: appointment, error: fetchError } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', appointmentId)
+      .single();
+
+    if (fetchError || !appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    if (req.user.role === 'doctor' && appointment.doctor_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Not your appointment' });
+    }
+
+    const recipientEmail = (patientEmail || appointment.email || '').trim();
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: 'patientEmail is required' });
+    }
+
+    const { error: updateError } = await supabase
+      .from('appointments')
+      .update({ status: dbStatus })
+      .eq('id', appointmentId);
+
+    if (updateError) throw updateError;
+
+    const subject = normalizedStatus === 'approved'
+      ? 'Appointment Approved ✅'
+      : 'Appointment Rejected ❌';
+    const message = normalizedStatus === 'approved'
+      ? 'Your appointment has been approved.'
+      : 'Your appointment has been rejected.';
+
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM,
+      to: recipientEmail,
+      subject,
+      text: message,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Appointment status notification error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update appointment status' });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
 // PATCH /api/doctor/appointments/:id/status — doctor updates own appointment
@@ -2142,6 +2223,7 @@ app.listen(PORT, async () => {
   console.log('  GET  /my-appointments');
   console.log('  GET  /all-appointments       (admin)');
   console.log('  PUT  /update-status           (admin)');
+  console.log('  PUT  /api/appointment/status   (doctor/admin)');
   console.log('  DEL  /admin/delete-user/:id   (admin)');
   console.log('  GET  /admin/analytics         (admin)');
   console.log('  POST /auth/reset-password');
