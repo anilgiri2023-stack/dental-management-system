@@ -27,7 +27,7 @@ const PORT = process.env.PORT || 5000;
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
+  port: Number(process.env.SMTP_PORT),
   secure: false,
   auth: {
     user: process.env.SMTP_USER,
@@ -92,6 +92,16 @@ function formatAppointmentDate(dateValue) {
   });
 }
 
+function logSmtpConfig(context = 'SMTP') {
+  console.log(`${context} SMTP_HOST:`, process.env.SMTP_HOST || 'MISSING');
+  console.log(`${context} SMTP_PORT:`, process.env.SMTP_PORT || 'MISSING');
+  console.log(`${context} SMTP_USER:`, process.env.SMTP_USER || 'MISSING');
+}
+
+function getMailFrom() {
+  return process.env.SMTP_FROM || process.env.SMTP_USER;
+}
+
 async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
   if (!patientEmail) {
     console.log('📧 Report email skipped: patient email missing');
@@ -146,7 +156,7 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
 `;
 
   await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+    from: getMailFrom(),
     to: patientEmail,
     subject: "Your Medical Report is Ready 🧾",
     html: reportHtmlTemplate,
@@ -1158,7 +1168,7 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
 `;
 
     await transporter.sendMail({
-      from: process.env.SMTP_FROM,
+      from: getMailFrom(),
       to: recipientEmail,
       subject,
       html: htmlTemplate,
@@ -1483,16 +1493,27 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
       return res.status(400).json({ success: false, message: 'Email and name are required' });
     }
 
+    const adminEmail = email.trim().toLowerCase();
+    const adminName = name.trim();
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://dental-management-system-sand.vercel.app').replace(/\/+$/, '');
+    const setPasswordUrl = `${frontendUrl}/set-password`;
+
     // 1. Invite user via Supabase Auth Admin API
     const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
-      email.trim().toLowerCase(),
+      adminEmail,
       {
-        data: { name: name.trim(), role: 'admin' },
-        redirectTo: 'https://dental-management-system-sand.vercel.app/set-password'
+        data: { name: adminName, role: 'admin' },
+        redirectTo: setPasswordUrl
       }
     );
 
     if (inviteError) {
+      console.error('SUPABASE INVITE ADMIN FAILED:', {
+        message: inviteError.message,
+        status: inviteError.status,
+        code: inviteError.code,
+        stack: inviteError.stack,
+      });
       return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invitation' });
     }
 
@@ -1503,8 +1524,8 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
       .from('users')
       .upsert({
         id: authUser.id,
-        email: email.trim().toLowerCase(),
-        name: name.trim(),
+        email: adminEmail,
+        name: adminName,
         role: 'admin',
         phone: 'N/A'
       }, { onConflict: 'id' });
@@ -1514,9 +1535,59 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
       return res.status(500).json({ success: false, message: 'Admin invited, but failed to sync to database' });
     }
 
-    res.json({ success: true, message: 'Admin invited successfully. Email sent to ' + email });
+    try {
+      logSmtpConfig('INVITE_ADMIN');
+      const inviteHtml = `
+<div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:24px;">
+  <div style="max-width:600px; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
+    <div style="background:#0f766e; padding:24px 20px; text-align:center;">
+      <h2 style="color:#ffffff; margin:0;">Clinical Serenity</h2>
+    </div>
+    <div style="padding:30px; color:#1f2937;">
+      <h3 style="margin-top:0;">Hello ${escapeHtml(adminName)},</h3>
+      <p>You have been invited to join Clinical Serenity as an administrator.</p>
+      <p>Please use the invitation email from Clinical Serenity to set your password. You can also open the password setup page below.</p>
+      <div style="margin:28px 0; text-align:center;">
+        <a href="${escapeHtml(setPasswordUrl)}" style="display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:13px 22px; border-radius:8px; font-weight:bold;">Set Password</a>
+      </div>
+      <p style="font-size:13px; color:#6b7280;">If you were not expecting this invitation, you can ignore this email.</p>
+    </div>
+    <div style="background:#f9fafb; text-align:center; padding:15px; font-size:12px; color:#777;">
+      © Clinical Serenity. All rights reserved.
+    </div>
+  </div>
+</div>`;
+
+      const mailInfo = await transporter.sendMail({
+        from: getMailFrom(),
+        to: adminEmail,
+        subject: 'You are invited to Clinical Serenity Admin',
+        html: inviteHtml,
+      });
+      console.log('INVITE_ADMIN email sent:', {
+        messageId: mailInfo.messageId,
+        response: mailInfo.response,
+        to: adminEmail,
+      });
+    } catch (mailError) {
+      console.error('INVITE_ADMIN sendMail failed:', {
+        message: mailError.message,
+        response: mailError.response,
+        responseCode: mailError.responseCode,
+        command: mailError.command,
+        code: mailError.code,
+        stack: mailError.stack,
+      });
+    }
+
+    res.json({ success: true, message: 'Admin invited successfully. Email sent to ' + adminEmail });
   } catch (error) {
-    console.error('SERVER ERROR — Invite admin:', error);
+    console.error('SERVER ERROR — Invite admin:', {
+      message: error.message,
+      stack: error.stack,
+      response: error.response,
+      responseCode: error.responseCode,
+    });
     res.status(500).json({ success: false, message: 'Server error during admin invite' });
   }
 });
@@ -2292,6 +2363,69 @@ app.get('/api/doctor/patients', authMiddleware, doctorOnly, async (req, res) => 
 // ═══════════════════════════════════════════════════════════
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT });
+});
+
+// GET /api/test-email — verify SMTP config and Nodemailer delivery
+app.get('/api/test-email', async (req, res) => {
+  try {
+    logSmtpConfig('TEST_EMAIL');
+
+    if (!process.env.SMTP_HOST || !process.env.SMTP_PORT || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      return res.status(500).json({
+        success: false,
+        message: 'SMTP configuration is incomplete',
+      });
+    }
+
+    const to = (req.query.to || process.env.SMTP_USER || '').toString().trim();
+    if (!to) {
+      return res.status(400).json({ success: false, message: 'Missing test recipient email' });
+    }
+
+    const html = `
+<div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:24px;">
+  <div style="max-width:600px; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
+    <div style="background:#0f766e; padding:24px 20px; text-align:center;">
+      <h2 style="color:#ffffff; margin:0;">Clinical Serenity</h2>
+    </div>
+    <div style="padding:30px; color:#1f2937;">
+      <h3 style="margin-top:0;">SMTP Test Email</h3>
+      <p>This confirms your Node.js backend can send email through the configured SMTP server.</p>
+      <div style="margin:20px 0; padding:15px; background:#f1f5f9; border-radius:8px;">
+        Sent at ${escapeHtml(new Date().toISOString())}
+      </div>
+    </div>
+    <div style="background:#f9fafb; text-align:center; padding:15px; font-size:12px; color:#777;">
+      © Clinical Serenity. All rights reserved.
+    </div>
+  </div>
+</div>`;
+
+    const info = await transporter.sendMail({
+      from: getMailFrom(),
+      to,
+      subject: 'Clinical Serenity SMTP Test',
+      html,
+    });
+
+    console.log('TEST_EMAIL sendMail success:', {
+      messageId: info.messageId,
+      response: info.response,
+      to,
+    });
+
+    res.json({ success: true, messageId: info.messageId });
+  } catch (error) {
+    console.error('TEST_EMAIL sendMail failed:', {
+      message: error.message,
+      response: error.response,
+      responseCode: error.responseCode,
+      command: error.command,
+      code: error.code,
+      stack: error.stack,
+    });
+    res.status(500).json({ success: false, message: error.message || 'Failed to send test email' });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════
