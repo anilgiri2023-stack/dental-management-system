@@ -1,8 +1,19 @@
 // Central API utility
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-export const API_BASE_URL = isLocal 
-  ? 'http://localhost:5000/api' 
-  : 'https://dental-management-system-gd47.onrender.com/api';
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+const devApiUrl = 'http://localhost:5000/api';
+const productionFallbackApiUrl = '/api';
+
+function normalizeApiUrl(url) {
+  return url.replace(/\/+$/, '');
+}
+
+export const API_BASE_URL = normalizeApiUrl(
+  configuredApiUrl || (import.meta.env.DEV ? devApiUrl : productionFallbackApiUrl)
+);
+
+if (!configuredApiUrl && import.meta.env.PROD) {
+  console.warn('VITE_API_URL is not set. Falling back to same-origin /api.');
+}
 
 export const apiFetch = async (endpoint, options = {}) => {
   const token = localStorage.getItem('cs_token');
@@ -82,7 +93,10 @@ export const uploadFetch = async (endpoint, formData) => {
   }
 
   if (!res.ok) {
-    throw new Error(data.message || 'Upload failed');
+    const error = new Error(data.message || 'Upload failed');
+    error.data = data;
+    error.status = res.status;
+    throw error;
   }
 
   return data;

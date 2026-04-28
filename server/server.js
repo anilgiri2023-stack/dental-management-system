@@ -31,13 +31,13 @@ app.use(express.json());
 // ─── Supabase (Service Role — bypasses RLS) ──────────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_SERVICE_KEY;
-const SERVICE_ROLE_KEY_SOURCE = process.env.SUPABASE_SERVICE_ROLE_KEY
-  ? 'SUPABASE_SERVICE_ROLE_KEY'
-  : process.env.SERVICE_ROLE_KEY
-    ? 'SERVICE_ROLE_KEY'
+const SERVICE_ROLE_KEY_SOURCE = process.env.SERVICE_ROLE_KEY
+  ? 'SERVICE_ROLE_KEY'
+  : process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? 'SUPABASE_SERVICE_ROLE_KEY'
     : process.env.SUPABASE_SERVICE_KEY
       ? 'SUPABASE_SERVICE_KEY'
       : null;
@@ -61,6 +61,7 @@ function getJwtRole(token) {
 }
 
 console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
+console.log("ENV:", process.env.SUPABASE_URL);
 console.log('SUPABASE_PROJECT_REF:', SUPABASE_URL ? getSupabaseProjectRef(SUPABASE_URL) : 'MISSING');
 console.log('SUPABASE_KEY_SOURCE:', SERVICE_ROLE_KEY_SOURCE || 'MISSING');
 console.log('SUPABASE_KEY_ROLE:', SERVICE_ROLE_KEY ? getJwtRole(SERVICE_ROLE_KEY) : 'MISSING');
@@ -158,6 +159,46 @@ function patientOnly(req, res, next) {
     return res.status(403).json({ success: false, message: 'Patient only' });
   }
   next();
+}
+
+async function ensureStorageBucket(bucketName, options = {}) {
+  const { public: isPublic = false } = options;
+  const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+
+  if (listError) {
+    console.error(`❌ Failed to list Supabase storage buckets for "${bucketName}":`, listError);
+    throw listError;
+  }
+
+  const bucket = (buckets || []).find((item) => item.name === bucketName);
+
+  if (!bucket) {
+    console.log(`🪣 Creating Supabase storage bucket "${bucketName}"`);
+    const { error: createError } = await supabase.storage.createBucket(bucketName, {
+      public: isPublic,
+      fileSizeLimit: 5 * 1024 * 1024,
+    });
+
+    if (createError) {
+      console.error(`❌ Failed to create Supabase storage bucket "${bucketName}":`, createError);
+      throw createError;
+    }
+
+    return;
+  }
+
+  if (isPublic && bucket.public !== true) {
+    console.log(`🪣 Making Supabase storage bucket "${bucketName}" public`);
+    const { error: updateError } = await supabase.storage.updateBucket(bucketName, {
+      public: true,
+      fileSizeLimit: 5 * 1024 * 1024,
+    });
+
+    if (updateError) {
+      console.error(`❌ Failed to update Supabase storage bucket "${bucketName}":`, updateError);
+      throw updateError;
+    }
+  }
 }
 
 // ─── Multer (memory storage for Supabase upload) ────────
@@ -943,18 +984,45 @@ const avatarUpload = multer({
   },
 });
 
+function handleAvatarUpload(req, res, next) {
+  avatarUpload.single('avatar')(req, res, (err) => {
+    if (!err) return next();
+
+    console.log("ENV:", process.env.SUPABASE_URL);
+    console.log("Request file:", req.file);
+    console.error('❌ Avatar multer error:', err);
+
+    const status = err instanceof multer.MulterError ? 400 : 400;
+    return res.status(status).json({
+      success: false,
+      message: err.message || 'Invalid avatar upload',
+    });
+  });
+}
+
 // POST /api/avatar/upload — upload profile picture
-app.post('/api/avatar/upload', authMiddleware, avatarUpload.single('avatar'), async (req, res) => {
+app.post('/api/avatar/upload', authMiddleware, handleAvatarUpload, async (req, res) => {
   try {
+    console.log("ENV:", process.env.SUPABASE_URL);
+    console.log("Request file:", req.file);
+
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, message: 'No image file provided' });
 
     const userId = req.user.id;
-    const fileExt = file.originalname.split('.').pop() || 'jpg';
-    const fileName = `${Date.now()}.${fileExt}`;
+    const fileExt = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
+    const fileName = `${userId}/${Date.now()}.${fileExt}`;
 
     console.log("Uploading to Supabase bucket: avatars");
     console.log("File name:", fileName);
+    console.log("File metadata:", {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      bufferBytes: file.buffer?.length || 0,
+    });
+
+    await ensureStorageBucket('avatars', { public: true });
 
     const { error: uploadErr } = await supabase.storage
       .from('avatars')
@@ -967,6 +1035,11 @@ app.post('/api/avatar/upload', authMiddleware, avatarUpload.single('avatar'), as
 
     const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
     const avatar_url = urlData?.publicUrl;
+
+    if (!avatar_url) {
+      console.error('❌ Avatar public URL missing:', urlData);
+      return res.status(500).json({ success: false, message: 'Avatar uploaded, but public URL could not be generated' });
+    }
 
     // Save URL in users table
     const { error: dbErr } = await supabase
@@ -2041,13 +2114,19 @@ app.listen(PORT, async () => {
     } else {
       console.log('✅ reports table OK (all columns verified)');
     }
-    // Check storage bucket
+    // Check storage buckets
     const { data: buckets } = await supabase.storage.listBuckets();
     const reportsBucket = (buckets || []).find(b => b.name === 'reports');
     if (reportsBucket) {
       console.log(`✅ Storage bucket "reports" OK (public: ${reportsBucket.public})`);
     } else {
       console.log('⚠️  Storage bucket "reports" NOT FOUND — create it in Supabase Dashboard → Storage');
+    }
+    const avatarsBucket = (buckets || []).find(b => b.name === 'avatars');
+    if (avatarsBucket) {
+      console.log(`✅ Storage bucket "avatars" OK (public: ${avatarsBucket.public})`);
+    } else {
+      console.log('⚠️  Storage bucket "avatars" NOT FOUND — avatar upload will attempt to create it');
     }
   } catch (e) {
     console.error('❌ DB check failed:', e.message);
