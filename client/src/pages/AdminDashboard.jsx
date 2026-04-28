@@ -182,15 +182,19 @@ export default function AdminDashboard() {
     setError('');
     setSuccessMsg('');
     try {
-      await authFetch(`/admin/invite-${inviteRole}`, {
+      const data = await authFetch(`/admin/invite-${inviteRole}`, {
         method: 'POST',
         body: JSON.stringify({ name: inviteName, email: inviteEmail }),
       });
-      setSuccessMsg(`${inviteRole === 'admin' ? 'Admin' : 'Doctor'} invitation sent to ${inviteEmail}`);
+
+      setSuccessMsg(data.message || `${inviteRole === 'admin' ? 'Admin' : 'Doctor'} invited successfully`);
       setShowInviteModal(false);
       setInviteName('');
       setInviteEmail('');
       if (activeTab === 'users') fetchUsers();
+      
+      // Auto-clear success message after 5 seconds
+      setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
       console.error(`Invite ${inviteRole} error:`, err);
       setError(err.message || `Failed to invite ${inviteRole}`);

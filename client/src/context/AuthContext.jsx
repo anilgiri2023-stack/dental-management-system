@@ -22,7 +22,11 @@ export function AuthProvider({ children }) {
 
   // Persist user to localStorage whenever it changes
   useEffect(() => {
-    console.log('👤 AuthContext state:', { user: user ? { id: user.id, email: user.email, role: user.role } : null, loading });
+    console.log('👤 AuthContext state:', { 
+      user: user ? { id: user.id, email: user.email, role: user.role } : null, 
+      loading,
+      isAuthenticated 
+    });
     if (user) {
       localStorage.setItem('cs_user', JSON.stringify(user));
     } else {
@@ -210,7 +214,7 @@ export function AuthProvider({ children }) {
       const type = params.get('type') || queryParams.get('type');
       const hasToken = hash.includes('access_token') || search.includes('token=');
       const hasErrorCode = hash.includes('error=') || search.includes('error=');
-      const isAuthPage = path === '/set-password' || path === '/reset-password';
+      const isAuthPage = path === '/set-password' || path === '/reset-password' || path === '/doctor-register';
       
       const active = hasToken || type === 'invite' || type === 'recovery' || hasErrorCode || isAuthPage;
       

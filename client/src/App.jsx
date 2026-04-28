@@ -21,6 +21,7 @@ import DoctorLoginPage from './pages/DoctorLoginPage';
 import AdminLoginPage from './pages/AdminLoginPage';
 import SetPassword from './pages/SetPassword';
 import ResetPassword from './pages/ResetPassword';
+import DoctorRegister from './pages/DoctorRegister';
 
 // Protected User Pages
 import UserDashboard from './pages/UserDashboard';
@@ -44,28 +45,45 @@ function PublicLayout({ children }) {
 }
 
 function App() {
+  console.log("🌐 CURRENT PATH:", window.location.pathname);
+
   return (
     <AuthProvider>
       <Router>
         <ScrollToTop />
         <Routes>
-          {/* Public pages with Navbar + Footer */}
+          {/* ═══════════════════════════════════════════════════════════
+              1. PUBLIC ROUTES (Always Accessible)
+              ═══════════════════════════════════════════════════════════ */}
           <Route path="/" element={<PublicLayout><Home /></PublicLayout>} />
           <Route path="/about" element={<PublicLayout><About /></PublicLayout>} />
           <Route path="/services" element={<PublicLayout><ServicesPage /></PublicLayout>} />
           <Route path="/doctors" element={<PublicLayout><DoctorsPage /></PublicLayout>} />
           <Route path="/gallery" element={<PublicLayout><GalleryPage /></PublicLayout>} />
-          <Route path="/book" element={<Navigate to="/patient/book" replace />} />
+          <Route path="/contact" element={<PublicLayout><ContactPage /></PublicLayout>} />
+          
+          {/* Doctor Invitation Registration (Must be public & top-level) */}
+          <Route
+          path="/doctor-register"
+          element={
+            <PublicLayout>
+              <DoctorRegister />
+            </PublicLayout>
+          }
+/>
 
-          {/* Auth Routes (no Navbar/Footer) */}
-          <Route path="/login" element={<Navigate to="/login/patient" replace />} />
+          {/* Auth Entry Points */}
           <Route path="/login/patient" element={<PatientLoginPage />} />
           <Route path="/login/doctor" element={<DoctorLoginPage />} />
           <Route path="/login/admin" element={<AdminLoginPage />} />
           <Route path="/set-password" element={<SetPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
 
-          {/* User dashboard (protected, no Navbar/Footer — has its own header) */}
+          {/* ═══════════════════════════════════════════════════════════
+              2. PROTECTED ROUTES (Require Specific Roles)
+              ═══════════════════════════════════════════════════════════ */}
+          
+          {/* Patient Routes */}
           <Route
             path="/patient"
             element={
@@ -82,9 +100,8 @@ function App() {
               </UserProtectedRoute>
             }
           />
-          <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
 
-          {/* Doctor dashboard (protected, no Navbar/Footer) */}
+          {/* Doctor Routes */}
           <Route
             path="/doctor"
             element={
@@ -94,10 +111,7 @@ function App() {
             }
           />
 
-          {/* Hidden admin login — NOT linked anywhere in UI (Deprecated path, redirects to new) */}
-          <Route path="/admin-login" element={<Navigate to="/login/admin" replace />} />
-
-          {/* Protected admin routes */}
+          {/* Admin Routes */}
           <Route
             path="/admin/dashboard"
             element={
@@ -106,7 +120,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* /admin-dashboard alias */}
           <Route
             path="/admin-dashboard"
             element={
@@ -116,14 +129,20 @@ function App() {
             }
           />
 
-          {/* Redirect /admin to /admin/dashboard */}
+          {/* ═══════════════════════════════════════════════════════════
+              3. REDIRECTS & ALIASES
+              ═══════════════════════════════════════════════════════════ */}
+          <Route path="/login" element={<Navigate to="/login/patient" replace />} />
+          <Route path="/book" element={<Navigate to="/patient/book" replace />} />
+          <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
+          <Route path="/admin-login" element={<Navigate to="/login/admin" replace />} />
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-
-          {/* Redirect /register to /login (no separate registration) */}
           <Route path="/register" element={<Navigate to="/login" replace />} />
 
-          {/* Catch all — redirect to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* ═══════════════════════════════════════════════════════════
+              4. CATCH-ALL (Fallback to Home)
+              ═══════════════════════════════════════════════════════════ */}
+          <Route path="*" element={<div>Page Not Found</div>} />
         </Routes>
       </Router>
     </AuthProvider>

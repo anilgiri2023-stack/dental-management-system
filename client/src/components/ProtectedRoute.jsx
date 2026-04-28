@@ -21,8 +21,8 @@ export default function ProtectedRoute({ children }) {
 
   // Not logged in at all → admin login
   if (!isAuthenticated) {
-    console.log('🔒 ProtectedRoute: Not authenticated, redirecting to /admin-login');
-    return <Navigate to="/admin-login" replace />;
+    console.log('🔒 ProtectedRoute: Not authenticated, redirecting to /login/admin');
+    return <Navigate to="/login/admin" replace />;
   }
 
   // Logged in but NOT admin → redirect to user dashboard

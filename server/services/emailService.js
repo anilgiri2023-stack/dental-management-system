@@ -49,7 +49,7 @@ const sendEmail = async (to, subject, message) => {
       from: `"Clinical Serenity" <${SMTP_FROM}>`,
       to,
       subject,
-      text: message,
+      html: message,
     });
 
     console.log("✅ EMAIL SENT SUCCESSFULLY");

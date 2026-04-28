@@ -114,7 +114,7 @@ app.post('/send-otp', async (req, res) => {
 
     const emailKey = email.trim().toLowerCase();
     const now = Date.now();
-    
+
     // 1. Check local throttle
     if (otpThrottle.has(emailKey)) {
       const lastSent = otpThrottle.get(emailKey);
@@ -147,7 +147,7 @@ app.post('/send-otp', async (req, res) => {
 
     // 4. Fallback to Manual Email if Supabase fails or is disabled
     console.log(`⚠️ Supabase Auth error: "${supabaseError.message}". Using fallback...`);
-    
+
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
         const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -156,21 +156,54 @@ app.post('/send-otp', async (req, res) => {
         const emailSent = await sendEmail(
           emailKey,
           "Your Verification Code - Clinical Serenity",
-          `Welcome to Clinical Serenity! Your verification code is: ${code}\n\nThis code will expire in 10 minutes.`
+          `
+<div style="font-family: 'Segoe UI', sans-serif; background:#f4f7fb; padding:30px;">
+  <div style="max-width:500px;margin:auto;background:white;border-radius:12px;padding:30px;box-shadow:0 6px 25px rgba(0,0,0,0.1);text-align:center;">
+    
+    <h2 style="color:#2e7d6b;margin-bottom:10px;">
+      Clinical Serenity
+    </h2>
+
+    <p style="font-size:16px;color:#333;">
+      Welcome! Please use the verification code below:
+    </p>
+
+    <div style="margin:25px 0;">
+      <span style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#2e7d6b;">
+        ${code}
+      </span>
+    </div>
+
+    <p style="color:#666;font-size:14px;">
+      This code will expire in <b>10 minutes</b>.
+    </p>
+
+    <p style="color:#999;font-size:12px;margin-top:20px;">
+      If you didn’t request this, you can safely ignore this email.
+    </p>
+
+    <hr style="margin:25px 0;border:none;border-top:1px solid #eee;" />
+
+    <p style="font-size:12px;color:#aaa;">
+      © Clinical Serenity
+    </p>
+  </div>
+</div>
+`
         );
 
         if (emailSent) {
           console.log(`✅ Fallback email sent successfully to ${emailKey}`);
           otpThrottle.set(emailKey, now);
-          return res.json({ 
-            success: true, 
-            message: `Verification code sent via backup system to ${emailKey}` 
+          return res.json({
+            success: true,
+            message: `Verification code sent via backup system to ${emailKey}`
           });
         } else {
           console.error(`❌ Fallback email failed for ${emailKey}`);
-          return res.status(500).json({ 
-            success: false, 
-            message: 'Email delivery failed. Please check your SMTP configuration or try again later.' 
+          return res.status(500).json({
+            success: false,
+            message: 'Email delivery failed. Please check your SMTP configuration or try again later.'
           });
         }
       } catch (fallbackErr) {
@@ -180,15 +213,15 @@ app.post('/send-otp', async (req, res) => {
     }
 
     // 5. If no fallback configured and Supabase failed
-    return res.status(supabaseError.status || 400).json({ 
-      success: false, 
-      message: `Failed to send verification code: ${supabaseError.message}` 
+    return res.status(supabaseError.status || 400).json({
+      success: false,
+      message: `Failed to send verification code: ${supabaseError.message}`
     });
 
   } catch (error) {
     console.error('🔥 CRITICAL ERROR in /send-otp:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: `Server Error: ${error.message || 'Internal failure'}`,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
@@ -222,7 +255,7 @@ app.post('/verify-otp', async (req, res) => {
       const record = manualOtps.get(emailKey);
       if (Date.now() < record.expires && record.code === otp) {
         console.log(`✅ Manual OTP match for: ${emailKey}`);
-        
+
         // Find or create user in Supabase Auth via Admin API
         const { data: users, error: listErr } = await supabase.auth.admin.listUsers();
         let targetAuthUser = (users?.users || []).find(u => u.email === emailKey);
@@ -285,12 +318,12 @@ app.post('/verify-otp', async (req, res) => {
       // Create new user in public.users linked to auth user ID
       const { data: newUser, error: createErr } = await supabase
         .from('users')
-        .insert([{ 
-           id: authUser.id,
-           email: email.trim().toLowerCase(), 
-           name: name || 'User', 
-           phone: phone || 'N/A',
-           role: 'user' 
+        .insert([{
+          id: authUser.id,
+          email: email.trim().toLowerCase(),
+          name: name || 'User',
+          phone: phone || 'N/A',
+          role: 'user'
         }])
         .select()
         .single();
@@ -488,7 +521,7 @@ app.post('/api/doctor/login', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 async function bookAppointment(req, res) {
   try {
-    const { date, time, service, phone, name, email, doctor_id } = req.body;
+    const { date, time, service, phone, name, email, doctor_id, doctor } = req.body;
 
     // Add console logs to confirm values before inserting into database
     console.log('--- Incoming Booking Request ---');
@@ -522,7 +555,7 @@ async function bookAppointment(req, res) {
     if (doctor_id) {
       insertData.doctor_id = doctor_id;
     }
-    
+
     const { data, error } = await supabase
       .from('appointments')
       .insert([insertData])
@@ -534,10 +567,61 @@ async function bookAppointment(req, res) {
       return res.status(500).json({ success: false, message: error.message });
     }
 
-    // Custom email notification removed. Supabase handles core auth emails.
-    // Manual appointment confirmation emails are disabled to prevent SMTP timeouts.
-
     console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${userId}]`);
+
+    try {
+      console.log("📧 Fetching doctor details...");
+      let doctorName = "Assigned Doctor";
+      
+      if (doctor_id) {
+        const { data: doctorData } = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', doctor_id)
+          .single();
+        
+        if (doctorData) doctorName = doctorData.name || "Assigned Doctor";
+      }
+
+      console.log("📧 Sending appointment email...");
+
+      const htmlContent = `
+<div style="font-family: Arial, sans-serif; background:#f4f7fb; padding:20px;">
+  <div style="max-width:600px;margin:auto;background:white;border-radius:12px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+    
+    <h2 style="color:#2e7d6b;">Clinical Serenity</h2>
+    <p style="font-size:16px;">Hello ${name},</p>
+
+    <p>Your appointment has been successfully booked.</p>
+
+    <div style="background:#f9fafc;padding:15px;border-radius:8px;">
+      <p><b>Doctor:</b> ${doctorName}</p>
+      <p><b>Service:</b> ${service}</p>
+      <p><b>Date:</b> ${date}</p>
+      <p><b>Time:</b> ${time}</p>
+      <p><b>Status:</b> Pending Approval</p>
+    </div>
+
+    <p style="margin-top:20px;">We look forward to serving you.</p>
+
+    <p style="font-size:14px;color:gray;">
+      — Clinical Serenity Team
+    </p>
+  </div>
+</div>
+`;
+
+      await sendEmail(
+        email,
+        "Appointment Confirmation - Clinical Serenity",
+        htmlContent
+      );
+
+      console.log("✅ Appointment email sent");
+    } catch (err) {
+      console.error("❌ Appointment email failed:", err);
+    }
+
     res.status(201).json({ success: true, message: 'Appointment booked', appointment: data });
   } catch (error) {
     console.error('Book appointment error:', error);
@@ -578,7 +662,7 @@ async function getMyAppointments(req, res) {
       const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
       const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
       const allIds = [...new Set([...userIds, ...doctorIds])];
-      
+
       const { data: usersData } = await supabase
         .from('users')
         .select('id, email, name, phone')
@@ -631,7 +715,7 @@ app.get('/all-appointments', authMiddleware, adminOnly, async (req, res) => {
       const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
       const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
       const allIdsToFetch = [...new Set([...userIds, ...doctorIds])];
-      
+
       const { data: usersData } = await supabase.from('users').select('id, email, name, phone, role').in('id', allIdsToFetch);
       const userMap = {};
       (usersData || []).forEach(u => { userMap[u.id] = u; });
@@ -711,7 +795,7 @@ app.patch('/api/doctor/appointments/:id/status', authMiddleware, doctorOnly, asy
   try {
     const appointmentId = req.params.id;
     const { status } = req.body;
-    
+
     if (!appointmentId) return res.status(400).json({ success: false, message: 'Appointment ID required' });
     if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Status must be Pending, Approved, or Rejected' });
@@ -821,13 +905,13 @@ app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { role } = req.query;
     let query = supabase.from('users').select('*').order('id', { ascending: false });
-    
+
     if (role) {
       query = query.eq('role', role);
     }
 
     const { data, error } = await query;
-    
+
     if (error) {
       console.error('❌ Supabase error fetching users:', error);
       return res.status(500).json({ success: false, error: error.message });
@@ -850,43 +934,135 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
       return res.status(400).json({ success: false, message: 'Email and name are required' });
     }
 
-    // 1. Invite user via Supabase Auth Admin API (sends fresh email every time)
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
+    // 1. Generate Custom Invite Link
+    const frontendUrl = process.env.FRONTEND_URL || 'https://dental-management-system-sand.vercel.app';
+    const inviteLink = `${frontendUrl}/doctor-register?email=${email.trim().toLowerCase()}`;
+
+    console.log('📧 Sending custom doctor invitation to:', email);
+
+    // 2. Send Invitation Email using existing emailService
+    const emailSent = await sendEmail(
       email.trim().toLowerCase(),
-      {
-        data: { name: name.trim(), role: 'doctor' },
-        redirectTo: 'https://dental-management-system-sand.vercel.app/set-password'
-      }
+      "You're invited as a Doctor - Clinical Serenity",
+      `
+<div style="font-family: Arial, sans-serif; padding:30px; background:#f4f7fb;">
+  <div style="max-width:600px; margin:auto; background:white; border-radius:12px; padding:30px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+    <h2 style="color:#2e7d6b;">Clinical Serenity</h2>
+    <p style="font-size:16px;">Hello ${name},</p>
+    <p>You have been invited to join <b>Clinical Serenity</b> as a professional doctor.</p>
+    <p>Please click the button below to set up your account and complete your registration:</p>
+
+    <div style="margin:30px 0; text-align:center;">
+      <a href="${inviteLink}" style="display:inline-block; padding:14px 28px; background:#2e7d6b; color:white; border-radius:8px; text-decoration:none; font-weight:bold; font-size:16px;">
+        Accept Invitation & Register
+      </a>
+    </div>
+
+    <p style="margin-top:20px; font-size:14px; color:gray;">
+      If the button above doesn't work, copy and paste this link into your browser:<br/>
+      <span style="color:#2e7d6b;">${inviteLink}</span>
+    </p>
+
+    <p style="margin-top:25px; font-size:14px; color:gray; border-top:1px solid #eee; padding-top:20px;">
+      Thank you,<br/>
+      <b>Clinical Serenity Team</b>
+    </p>
+  </div>
+</div>
+`
     );
-    
-    if (inviteError) {
-      console.error('INVITE FAILED:', inviteError);
-      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invitation' });
+
+    if (!emailSent) {
+      return res.status(500).json({ success: false, message: 'Failed to send invitation email. Please check SMTP settings.' });
     }
 
-    const authUser = inviteData.user;
-    console.log('✅ Supabase invitation sent/refreshed for:', email);
-
-    // 2. Upsert into public.users table (allows re-inviting)
+    // 3. Upsert into public.users table (allows re-inviting or updating existing user)
+    // We use email as conflict target since we don't have a Supabase Auth ID yet
     const { error: upsertError } = await supabase
       .from('users')
       .upsert({
-        id: authUser.id,
         email: email.trim().toLowerCase(),
         name: name.trim(),
         role: 'doctor',
+        status: 'invited',
         phone: 'N/A'
-      }, { onConflict: 'id' });
+      }, { onConflict: 'email' });
 
     if (upsertError) {
       console.error('UPSERT USER FAILED:', upsertError);
-      return res.status(500).json({ success: false, message: 'Invited, but failed to sync to database' });
+      return res.status(500).json({ success: false, message: 'Email sent, but failed to record invitation in database' });
     }
 
-    res.json({ success: true, message: 'Doctor invited successfully. Email sent to ' + email });
+    res.json({ success: true, message: 'Doctor invitation email sent successfully to ' + email });
   } catch (error) {
     console.error('SERVER ERROR — Invite doctor:', error);
     res.status(500).json({ success: false, message: 'Server error during invite' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/doctor/register — complete doctor invitation
+// ═══════════════════════════════════════════════════════════
+app.post('/api/doctor/register', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email and password are required' });
+    }
+
+    console.log(`🩺 Registration attempt for invited doctor: ${email}`);
+
+    // 1. Check if user is actually invited
+    const { data: invitedUser, error: findError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email.trim().toLowerCase())
+      .single();
+
+    if (findError || !invitedUser) {
+      console.warn(`⚠️ Registration failed: No invitation found for ${email}`);
+      return res.status(404).json({ success: false, message: 'No invitation found for this email' });
+    }
+
+    if (invitedUser.role !== 'doctor' || invitedUser.status !== 'invited') {
+      if (invitedUser.role === 'doctor' && invitedUser.status === 'active') {
+        return res.status(400).json({ success: false, message: 'This account is already registered. Please login.' });
+      }
+      return res.status(403).json({ success: false, message: 'Invalid invitation status' });
+    }
+
+    // 2. Create user in Supabase Auth (using admin API to bypass email confirmation)
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: email.trim().toLowerCase(),
+      password: password,
+      email_confirm: true,
+      user_metadata: { name: invitedUser.name, role: 'doctor' }
+    });
+
+    if (authError) {
+      console.error('❌ Auth registration error:', authError.message);
+      return res.status(500).json({ success: false, message: authError.message });
+    }
+
+    // 3. Update public.users table with the new Auth ID and status='active'
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ 
+        id: authData.user.id, 
+        status: 'active' 
+      })
+      .eq('email', email.trim().toLowerCase());
+
+    if (updateError) {
+      console.error('❌ Database sync error:', updateError.message);
+      return res.status(500).json({ success: false, message: 'Auth created but failed to sync database' });
+    }
+
+    console.log(`✅ Doctor registered successfully: ${email}`);
+    res.json({ success: true, message: 'Registration complete. You can now log in.' });
+  } catch (err) {
+    console.error('❌ Doctor registration error:', err);
+    res.status(500).json({ success: false, message: 'Server error during registration' });
   }
 });
 // ═══════════════════════════════════════════════════════════
@@ -1135,8 +1311,8 @@ app.post('/api/auth/complete-reset-password', async (req, res) => {
     }
 
     console.log(`✅ Password reset complete for: ${user.email}`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Your password has been reset successfully.',
       role: user.user_metadata?.role || 'user'
     });
@@ -1676,7 +1852,7 @@ cron.schedule('0 8 * * *', async () => {
 
     console.log(`📧 Found ${(apts || []).length} appointment(s) for tomorrow (${tomorrowStr})`);
 
-      // Manual reminder emails disabled.
+    // Manual reminder emails disabled.
   } catch (err) {
     console.error('Reminder cron error:', err);
   }
