@@ -71,6 +71,27 @@ function getJwtRole(token) {
   }
 }
 
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatAppointmentDate(dateValue) {
+  if (!dateValue) return '';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return String(dateValue);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
 console.log("ENV:", process.env.SUPABASE_URL);
 console.log('SUPABASE_PROJECT_REF:', SUPABASE_URL ? getSupabaseProjectRef(SUPABASE_URL) : 'MISSING');
@@ -957,8 +978,8 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Doctor or admin only' });
     }
 
-    const { appointmentId, status, patientEmail } = req.body;
-    const normalizedStatus = String(status || '').trim().toLowerCase();
+    const { appointmentId, status: requestedStatus, patientEmail } = req.body;
+    const normalizedStatus = String(requestedStatus || '').trim().toLowerCase();
     const statusMap = {
       approved: 'Approved',
       rejected: 'Rejected',
@@ -999,18 +1020,87 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
 
     if (updateError) throw updateError;
 
+    let doctorName = req.user?.name || 'Your Doctor';
+    if (appointment.doctor_id) {
+      const { data: doctor } = await supabase
+        .from('users')
+        .select('name')
+        .eq('id', appointment.doctor_id)
+        .single();
+      doctorName = doctor?.name || doctorName;
+    }
+
+    const logoUrl = process.env.LOGO_URL || "https://via.placeholder.com/150";
+    const frontendUrl = (process.env.FRONTEND_URL || "https://example.com").replace(/\/+$/, '');
+    const patientName = appointment.name || 'there';
+    const date = formatAppointmentDate(appointment.date);
+    const status = dbStatus;
+    const statusColor = normalizedStatus === 'approved' ? '#16a34a' : '#dc2626';
+    const statusBackground = normalizedStatus === 'approved' ? '#dcfce7' : '#fee2e2';
+    const statusBorder = normalizedStatus === 'approved' ? '#86efac' : '#fecaca';
+    const statusLabel = normalizedStatus === 'approved' ? 'Approved ✅' : 'Rejected ❌';
+
     const subject = normalizedStatus === 'approved'
       ? 'Appointment Approved ✅'
       : 'Appointment Rejected ❌';
-    const message = normalizedStatus === 'approved'
-      ? 'Your appointment has been approved.'
-      : 'Your appointment has been rejected.';
+
+    const htmlTemplate = `
+<div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:20px; margin:0;">
+  <div style="display:none; max-height:0; overflow:hidden;">Your Clinical Serenity appointment status has been updated.</div>
+  <div style="max-width:600px; width:100%; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
+    <div style="background:#0f766e; padding:24px 20px; text-align:center;">
+      <img src="${escapeHtml(logoUrl)}" alt="Clinical Serenity Logo" style="height:54px; max-width:180px; object-fit:contain;" />
+      <h2 style="color:#ffffff; margin:12px 0 0; font-size:24px; line-height:1.2;">Clinical Serenity</h2>
+    </div>
+
+    <div style="padding:30px; color:#1f2937;">
+      <h3 style="margin:0 0 14px; font-size:20px; line-height:1.4;">Hello ${escapeHtml(patientName)},</h3>
+
+      <p style="margin:0 0 18px; color:#4b5563; font-size:15px; line-height:1.7;">Your appointment status has been updated.</p>
+
+      <div style="margin:18px 0 24px;">
+        <span style="display:inline-block; padding:8px 14px; border-radius:999px; background:${statusBackground}; border:1px solid ${statusBorder}; color:${statusColor}; font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">
+          ${escapeHtml(statusLabel)}
+        </span>
+      </div>
+
+      <div style="border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; margin:0 0 22px;">
+        <div style="padding:14px 16px; background:#f8fafc; border-bottom:1px solid #e5e7eb;">
+          <strong style="color:#111827;">Appointment Details</strong>
+        </div>
+        <div style="padding:16px;">
+          <p style="margin:0 0 10px;"><strong>Patient:</strong> ${escapeHtml(patientName)}</p>
+          <p style="margin:0 0 10px;"><strong>Doctor:</strong> Dr. ${escapeHtml(doctorName)}</p>
+          ${date ? `<p style="margin:0 0 10px;"><strong>Appointment Date:</strong> ${escapeHtml(date)}</p>` : ''}
+          <p style="margin:0;"><strong>Status:</strong> ${escapeHtml(status)}</p>
+        </div>
+      </div>
+
+      <div style="margin:20px 0; padding:15px; background:#f1f5f9; border-radius:8px;">
+        We appreciate your trust in Clinical Serenity.
+      </div>
+
+      <div style="margin:28px 0; text-align:center;">
+        <a href="${escapeHtml(`${frontendUrl}/doctor`)}" style="display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:13px 22px; border-radius:8px; font-weight:bold; font-size:15px;">
+          View Dashboard
+        </a>
+      </div>
+
+      <p style="margin:30px 0 0; color:#374151; line-height:1.6;">Thank you,<br/>Clinical Serenity Team</p>
+    </div>
+
+    <div style="background:#f9fafb; text-align:center; padding:15px; font-size:12px; color:#777;">
+      © Clinical Serenity. All rights reserved.
+    </div>
+  </div>
+</div>
+`;
 
     await transporter.sendMail({
       from: process.env.SMTP_FROM,
       to: recipientEmail,
       subject,
-      text: message,
+      html: htmlTemplate,
     });
 
     res.json({ success: true });
