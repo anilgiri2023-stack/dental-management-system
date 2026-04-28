@@ -92,6 +92,67 @@ function formatAppointmentDate(dateValue) {
   });
 }
 
+async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
+  if (!patientEmail) {
+    console.log('📧 Report email skipped: patient email missing');
+    return;
+  }
+
+  const frontendUrl = (process.env.FRONTEND_URL || "https://example.com").replace(/\/+$/, '');
+  const logoUrl = process.env.LOGO_URL || "https://via.placeholder.com/150";
+  const reportUrl = `${frontendUrl}/patient-reports`;
+
+  const reportHtmlTemplate = `
+<div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:20px; margin:0;">
+  <div style="display:none; max-height:0; overflow:hidden;">Your medical report has been uploaded by Clinical Serenity.</div>
+  <div style="max-width:600px; width:100%; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
+    <div style="background:#0f766e; padding:24px 20px; text-align:center;">
+      <img src="${escapeHtml(logoUrl)}" alt="Clinical Serenity Logo" style="height:54px; max-width:180px; object-fit:contain;" />
+      <h2 style="color:#ffffff; margin:12px 0 0; font-size:24px; line-height:1.2;">Clinical Serenity</h2>
+    </div>
+
+    <div style="padding:30px; color:#1f2937;">
+      <h3 style="margin:0 0 14px; font-size:20px; line-height:1.4;">Hello ${escapeHtml(patientName || 'there')},</h3>
+      <p style="margin:0 0 18px; color:#4b5563; font-size:15px; line-height:1.7;">Your report has been uploaded.</p>
+
+      <div style="border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; margin:0 0 22px;">
+        <div style="padding:14px 16px; background:#f8fafc; border-bottom:1px solid #e5e7eb;">
+          <strong style="color:#111827;">Report Details</strong>
+        </div>
+        <div style="padding:16px;">
+          <p style="margin:0 0 10px;"><strong>Patient:</strong> ${escapeHtml(patientName || 'Patient')}</p>
+          <p style="margin:0;"><strong>Doctor:</strong> Dr. ${escapeHtml(doctorName || 'Your Doctor')}</p>
+        </div>
+      </div>
+
+      <div style="margin:20px 0; padding:15px; background:#f1f5f9; border-radius:8px;">
+        Your medical report is now ready to view in your Clinical Serenity dashboard.
+      </div>
+
+      <div style="margin:28px 0; text-align:center;">
+        <a href="${escapeHtml(reportUrl)}" style="display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:13px 22px; border-radius:8px; font-weight:bold; font-size:15px;">
+          View Report
+        </a>
+      </div>
+
+      <p style="margin:30px 0 0; color:#374151; line-height:1.6;">Thank you,<br/>Clinical Serenity Team</p>
+    </div>
+
+    <div style="background:#f9fafb; text-align:center; padding:15px; font-size:12px; color:#777;">
+      © Clinical Serenity. All rights reserved.
+    </div>
+  </div>
+</div>
+`;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
+    to: patientEmail,
+    subject: "Your Medical Report is Ready 🧾",
+    html: reportHtmlTemplate,
+  });
+}
+
 console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
 console.log("ENV:", process.env.SUPABASE_URL);
 console.log('SUPABASE_PROJECT_REF:', SUPABASE_URL ? getSupabaseProjectRef(SUPABASE_URL) : 'MISSING');
@@ -1821,7 +1882,7 @@ app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file')
     // ─── Validate FK references exist before insert ───
     // 1. Check doctor exists in users table
     const { data: doctorRow, error: doctorErr } = await supabase
-      .from('users').select('id, role').eq('id', doctor_id).single();
+      .from('users').select('id, role, name, email').eq('id', doctor_id).single();
     if (doctorErr || !doctorRow) {
       console.error('❌ doctor_id NOT FOUND in users table:', doctor_id, doctorErr);
       return res.status(400).json({ success: false, message: `Doctor ID "${doctor_id}" not found in users table. Your session may be stale — please log out and log back in.` });
@@ -1883,8 +1944,7 @@ app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file')
       doctor_id,
       appointment_id: appointment_id || null,
       title: title || 'Medical Report',
-      file_url,
-      uploadedAt: new Date()
+      file_url
     };
 
     console.log('📝 INSERT PAYLOAD for reports table:', JSON.stringify(insertPayload, null, 2));
@@ -1910,6 +1970,23 @@ app.post('/api/upload-report', authMiddleware, doctorOnly, upload.single('file')
     }
 
     console.log(`✅ Report record created: ${report.id}, URL: ${file_url}`);
+
+    try {
+      console.log(`📧 Sending report-ready email to ${patientRow.email}`);
+      await sendReportReadyEmail({
+        patientEmail: patientRow.email,
+        patientName: patientRow.name,
+        doctorName: doctorRow.name || req.user.name,
+      });
+      console.log(`✅ Report-ready email sent to ${patientRow.email}`);
+    } catch (emailErr) {
+      console.error('❌ Report upload email failed:', {
+        message: emailErr.message,
+        response: emailErr.response,
+        responseCode: emailErr.responseCode,
+      });
+    }
+
     res.status(201).json({ success: true, message: 'Report uploaded successfully', report });
   } catch (err) {
     console.error('❌ Upload report error:', err);
