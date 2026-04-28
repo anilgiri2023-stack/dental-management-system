@@ -7,7 +7,7 @@ import { Eye, EyeOff } from 'lucide-react';
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [accessToken, setAccessToken] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
@@ -21,41 +21,22 @@ export default function ResetPassword() {
     const handleAuthSession = async () => {
       try {
         console.log("URL:", window.location.href);
-        const hash = window.location.hash;
-        console.log("HASH:", hash);
+        const search = window.location.search;
+        const params = new URLSearchParams(search);
+        const token = params.get('token');
 
-        if (hash && hash.includes('access_token')) {
-          const params = new URLSearchParams(hash.substring(1));
-          const access_token = params.get('access_token');
-          console.log("TOKEN:", access_token);
-
-          if (!access_token) {
-            setError('No reset token found. Please use the link in your email.');
-            setInitializing(false);
-            return;
-          }
-
-          // Set Supabase session so auth.updateUser works on backend
-          const { error: sessionErr } = await supabase.auth.setSession({
-            access_token,
-            refresh_token: access_token
-          });
-
-          if (sessionErr) {
-            console.error("Session set error:", sessionErr);
-            setError('Verification failed. Your link may be expired.');
-            setInitializing(false);
-            return;
-          }
-
-          setAccessToken(access_token);
-          setSessionReady(true);
-          window.history.replaceState(null, '', window.location.pathname);
-          setInitializing(false);
-        } else {
+        if (!token) {
           setError('No reset token found. Please use the link in your email.');
           setInitializing(false);
+          return;
         }
+
+        console.log("TOKEN DETECTED:", token.substring(0, 5) + "...");
+
+        setResetToken(token);
+        setSessionReady(true);
+        window.history.replaceState(null, '', window.location.pathname);
+        setInitializing(false);
       } catch (err) {
         console.error('Auth session error:', err);
         setError('Something went wrong verifying your reset link. Please try again.');
@@ -81,12 +62,12 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      // Use backend API to update password in both Auth and our users table
+      // Use backend API to update password (Requirement #4)
       await apiFetch('/auth/complete-reset-password', {
         method: 'POST',
         body: JSON.stringify({
           password: password,
-          access_token: accessToken
+          token: resetToken
         })
       });
 

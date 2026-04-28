@@ -33,6 +33,24 @@ import DoctorDashboard from './pages/DoctorDashboard';
 // Protected Admin Pages
 import AdminDashboard from './pages/AdminDashboard';
 
+// Fallback Page
+function NotFound() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+      <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center mb-6">
+        <span className="text-4xl text-red-500 font-bold">404</span>
+      </div>
+      <h1 className="text-2xl font-bold text-gray-900 mb-2">Page Not Found</h1>
+      <p className="text-gray-500 mb-8 text-center max-w-sm">
+        The page you are looking for might have been moved, deleted, or never existed.
+      </p>
+      <Link to="/" className="bg-primary text-white px-6 py-2 rounded-xl font-semibold hover:bg-primary-dark transition-all">
+        Go Back Home
+      </Link>
+    </div>
+  );
+}
+
 // Layout wrapper for pages with Navbar + Footer
 function PublicLayout({ children }) {
   return (
@@ -93,7 +111,7 @@ function App() {
             }
           />
           <Route
-            path="/patient/book"
+            path="/dashboard/book"
             element={
               <UserProtectedRoute>
                 <BookingPage />
@@ -133,7 +151,7 @@ function App() {
               3. REDIRECTS & ALIASES
               ═══════════════════════════════════════════════════════════ */}
           <Route path="/login" element={<Navigate to="/login/patient" replace />} />
-          <Route path="/book" element={<Navigate to="/patient/book" replace />} />
+          <Route path="/book" element={<Navigate to="/dashboard/book" replace />} />
           <Route path="/dashboard" element={<Navigate to="/patient" replace />} />
           <Route path="/admin-login" element={<Navigate to="/login/admin" replace />} />
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
@@ -142,7 +160,7 @@ function App() {
           {/* ═══════════════════════════════════════════════════════════
               4. CATCH-ALL (Fallback to Home)
               ═══════════════════════════════════════════════════════════ */}
-          <Route path="*" element={<div>Page Not Found</div>} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>
     </AuthProvider>

@@ -148,7 +148,7 @@ export default function Navbar() {
               </div>
             )}
             <Link
-              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/patient/book") : "/login"}
+              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/dashboard/book") : "/login"}
               className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5"
             >
               {isAuthenticated && (user?.role === 'doctor' || user?.role === 'admin') ? "Go to Dashboard" : "Book Appointment"}
@@ -249,7 +249,7 @@ export default function Navbar() {
             )}
 
             <Link
-              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/patient/book") : "/login"}
+              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/dashboard/book") : "/login"}
               className="block text-center bg-primary text-white px-6 py-3 rounded-xl text-sm font-semibold mt-3 hover:bg-primary-dark transition-colors"
             >
               Book Appointment

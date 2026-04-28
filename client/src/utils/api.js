@@ -6,6 +6,8 @@ export const API_BASE_URL = isLocal
 
 export const apiFetch = async (endpoint, options = {}) => {
   const token = localStorage.getItem('cs_token');
+  const user = localStorage.getItem('cs_user');
+  
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -13,6 +15,11 @@ export const apiFetch = async (endpoint, options = {}) => {
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  if (user) {
+    // Send user data in x-user header (base64 encoded to handle special characters)
+    headers['x-user'] = btoa(unescape(encodeURIComponent(user)));
   }
 
   let res;
@@ -44,9 +51,13 @@ export const apiFetch = async (endpoint, options = {}) => {
 // Upload helper for multipart/form-data (file uploads)
 export const uploadFetch = async (endpoint, formData) => {
   const token = localStorage.getItem('cs_token');
+  const user = localStorage.getItem('cs_user');
   const headers = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (user) {
+    headers['x-user'] = btoa(unescape(encodeURIComponent(user)));
   }
   // Do NOT set Content-Type — browser sets multipart boundary automatically
 

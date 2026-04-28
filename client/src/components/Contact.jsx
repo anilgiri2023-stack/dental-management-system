@@ -46,6 +46,8 @@ export default function Contact() {
         method: 'POST',
         body: JSON.stringify({
           name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
           date: formData.date,
           time: formData.time || '10:00 AM',
           service: formData.service,

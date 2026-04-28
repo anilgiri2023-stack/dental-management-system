@@ -67,18 +67,22 @@ export default function SetPassword() {
             return;
           }
 
-          // 3. Force initialize session in Supabase SDK
-          console.log("🔄 Initializing session with Supabase SDK...");
-          const { error: sessionErr } = await supabase.auth.setSession({
-            access_token,
-            refresh_token: refresh_token || access_token // fallback
-          });
+          // 3. Force initialize session in Supabase SDK only if it's a Supabase token
+          if (refresh_token || hash) {
+            console.log("🔄 Initializing session with Supabase SDK...");
+            const { error: sessionErr } = await supabase.auth.setSession({
+              access_token,
+              refresh_token: refresh_token || access_token // fallback
+            });
 
-          if (sessionErr) {
-            console.error("❌ setSession error:", sessionErr);
-            setError('Invite link expired. Please request a new invite.');
-            setInitializing(false);
-            return;
+            if (sessionErr) {
+              console.error("❌ setSession error:", sessionErr);
+              setError('Invite link expired. Please request a new invite.');
+              setInitializing(false);
+              return;
+            }
+          } else {
+            console.log("ℹ️ Manual token detected, skipping Supabase session initialization.");
           }
 
           console.log("✅ Session initialized for flow:", type);

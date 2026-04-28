@@ -12,6 +12,7 @@ const fs = require('fs');
 const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
+const bcrypt = require('bcryptjs');
 
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
@@ -53,17 +54,46 @@ function signToken(payload) {
 }
 
 // ─── Auth Middleware ─────────────────────────────────────
-function authMiddleware(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Login required' });
-  }
+async function authMiddleware(req, res, next) {
   try {
-    req.user = jwt.verify(header.split(' ')[1], JWT_SECRET);
-    next();
+    // 1. Accept user data from frontend via headers (Requirement #2)
+    const xUser = req.headers['x-user'];
+    
+    if (xUser) {
+      try {
+        // Decode base64 user object
+        const decodedUser = JSON.parse(decodeURIComponent(escape(Buffer.from(xUser, 'base64').toString())));
+        
+        if (decodedUser && decodedUser.id) {
+          req.user = {
+            ...decodedUser,
+            role: decodedUser.role || 'user'
+          };
+          return next();
+        }
+      } catch (parseErr) {
+        console.error('❌ Failed to parse x-user header:', parseErr.message);
+      }
+    }
+
+    // 2. Fallback to token validation (Legacy/Custom JWT)
+    const header = req.headers.authorization;
+    if (header?.startsWith('Bearer ')) {
+      const token = header.split(' ')[1];
+      try {
+        req.user = jwt.verify(token, JWT_SECRET);
+        return next();
+      } catch (jwtErr) {
+        console.error('❌ Legacy JWT verification failed');
+      }
+    }
+
+    // 3. If neither provided, return 401 (Requirement #5)
+    return res.status(401).json({ success: false, message: 'Authentication required' });
+
   } catch (err) {
-    console.error('JWT verify failed:', err.message);
-    return res.status(401).json({ success: false, message: 'Session expired' });
+    console.error('Middleware error:', err.message);
+    return res.status(401).json({ success: false, message: 'Authentication error' });
   }
 }
 
@@ -128,35 +158,22 @@ app.post('/send-otp', async (req, res) => {
       }
     }
 
-    // 2. Attempt Supabase Auth (if enabled/configured)
-    console.log('  -> Attempting Supabase Auth...');
-    const { error: supabaseError } = await supabase.auth.signInWithOtp({
-      email: emailKey,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: 'https://dental-management-system-sand.vercel.app/'
-      }
-    });
-
-    // 3. Handle Supabase success
-    if (!supabaseError) {
-      console.log('✅ Supabase Auth sent OTP successfully');
-      otpThrottle.set(emailKey, now);
-      return res.json({ success: true, message: `Verification code sent by Supabase to ${email}` });
+    // 2. Manual OTP logic (Bypassing Supabase Auth OTP to avoid rate limits/SMTP issues)
+    console.log('  -> Generating manual OTP...');
+    
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('❌ SMTP credentials missing. Cannot send manual OTP.');
+      return res.status(500).json({ success: false, message: 'Server configuration error: SMTP credentials missing.' });
     }
 
-    // 4. Fallback to Manual Email if Supabase fails or is disabled
-    console.log(`⚠️ Supabase Auth error: "${supabaseError.message}". Using fallback...`);
+    try {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
 
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
-        manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
-
-        const emailSent = await sendEmail(
-          emailKey,
-          "Your Verification Code - Clinical Serenity",
-          `
+      const emailSent = await sendEmail(
+        emailKey,
+        "Your Verification Code - Clinical Serenity",
+        `
 <div style="font-family: 'Segoe UI', sans-serif; background:#f4f7fb; padding:30px;">
   <div style="max-width:500px;margin:auto;background:white;border-radius:12px;padding:30px;box-shadow:0 6px 25px rgba(0,0,0,0.1);text-align:center;">
     
@@ -190,26 +207,25 @@ app.post('/send-otp', async (req, res) => {
   </div>
 </div>
 `
-        );
+      );
 
-        if (emailSent) {
-          console.log(`✅ Fallback email sent successfully to ${emailKey}`);
-          otpThrottle.set(emailKey, now);
-          return res.json({
-            success: true,
-            message: `Verification code sent via backup system to ${emailKey}`
-          });
-        } else {
-          console.error(`❌ Fallback email failed for ${emailKey}`);
-          return res.status(500).json({
-            success: false,
-            message: 'Email delivery failed. Please check your SMTP configuration or try again later.'
-          });
-        }
-      } catch (fallbackErr) {
-        console.error(`❌ Critical fallback error:`, fallbackErr.message);
-        return res.status(500).json({ success: false, message: 'Internal fallback error: ' + fallbackErr.message });
+      if (emailSent) {
+        console.log(`✅ Verification email sent to ${emailKey}`);
+        otpThrottle.set(emailKey, now);
+        return res.json({
+          success: true,
+          message: `Verification code sent to ${emailKey}`
+        });
+      } else {
+        console.error(`❌ Email delivery failed for ${emailKey}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Email delivery failed. Please try again later.'
+        });
       }
+    } catch (err) {
+      console.error(`❌ OTP generation error:`, err.message);
+      return res.status(500).json({ success: false, message: 'Internal server error: ' + err.message });
     }
 
     // 5. If no fallback configured and Supabase failed
@@ -246,53 +262,53 @@ app.post('/verify-otp', async (req, res) => {
     const { email, otp, name, phone } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
-    console.log(`🔑 Verifying Supabase OTP for: ${email}`);
+    console.log(`🔑 Verifying Manual OTP for: ${email}`);
     const emailKey = email.trim().toLowerCase();
 
-    // 1. Check Manual Fallback Store first
+    // 1. Verify against Manual Fallback Store
     let authUser = null;
-    if (manualOtps.has(emailKey)) {
-      const record = manualOtps.get(emailKey);
-      if (Date.now() < record.expires && record.code === otp) {
-        console.log(`✅ Manual OTP match for: ${emailKey}`);
-
-        // Find or create user in Supabase Auth via Admin API
-        const { data: users, error: listErr } = await supabase.auth.admin.listUsers();
-        let targetAuthUser = (users?.users || []).find(u => u.email === emailKey);
-
-        if (!targetAuthUser) {
-          console.log(`🆕 Creating new auth user for: ${emailKey}`);
-          const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
-            email: emailKey,
-            email_confirm: true,
-            user_metadata: { name: name || 'User' }
-          });
-          if (createErr) throw createErr;
-          targetAuthUser = newUser.user;
-        }
-
-        authUser = targetAuthUser;
-        manualOtps.delete(emailKey); // Cleanup
-      }
+    
+    if (!manualOtps.has(emailKey)) {
+      console.log(`❌ No OTP found for: ${emailKey}`);
+      return res.status(400).json({ success: false, message: 'No verification code found. Please request a new one.' });
     }
 
-    // 2. If no manual match, verify with Supabase
-    if (!authUser) {
-      const { data: authData, error: authErr } = await supabase.auth.verifyOtp({
+    const record = manualOtps.get(emailKey);
+    const now = Date.now();
+
+    if (now > record.expires) {
+      console.log(`❌ OTP expired for: ${emailKey}`);
+      manualOtps.delete(emailKey);
+      return res.status(400).json({ success: false, message: 'Verification code expired. Please request a new one.' });
+    }
+
+    if (record.code !== otp) {
+      console.log(`❌ OTP mismatch for: ${emailKey}. Expected ${record.code}, got ${otp}`);
+      return res.status(400).json({ success: false, message: 'Invalid verification code.' });
+    }
+
+    console.log(`✅ Manual OTP match for: ${emailKey}`);
+
+    // 2. Find or create user in Supabase Auth via Admin API (Requirement #6: Bypass Auth OTP)
+    const { data: usersData, error: listErr } = await supabase.auth.admin.listUsers();
+    let targetAuthUser = (usersData?.users || []).find(u => u.email === emailKey);
+
+    if (!targetAuthUser) {
+      console.log(`🆕 Creating new auth user for: ${emailKey}`);
+      const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
         email: emailKey,
-        token: otp,
-        type: 'email'
+        email_confirm: true,
+        user_metadata: { name: name || 'User' }
       });
-
-      if (authErr) {
-        console.error('❌ Supabase verifyOtp error:', authErr.message);
-        return res.status(400).json({ success: false, message: authErr.message });
-      }
-      authUser = authData.user;
+      if (createErr) throw createErr;
+      targetAuthUser = newUser.user;
     }
 
+    authUser = targetAuthUser;
+    manualOtps.delete(emailKey); // Cleanup
+
     if (!authUser) {
-      return res.status(401).json({ success: false, message: 'Session failed. Please try again.' });
+      return res.status(401).json({ success: false, message: 'Authentication failed. Please try again.' });
     }
 
     // Find or create user in "users" table
@@ -335,17 +351,22 @@ app.post('/verify-otp', async (req, res) => {
       user = newUser;
     }
 
-    // Generate app-specific JWT (consistent with existing logic)
+    // Generate session token (Requirement #2: Fix authData is not defined)
     const token = signToken({
       id: user.id,
       email: user.email,
       role: user.role || 'user',
     });
 
+    // Sync role to Supabase Auth metadata for public.users independence (Requirement #5)
+    await supabase.auth.admin.updateUserById(authUser.id, {
+      user_metadata: { role: user.role || 'user', name: user.name }
+    });
+
     res.json({
       success: true,
       message: 'Login successful',
-      token, // This is the JWT our app uses
+      token,
       user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: user.role || 'user' },
     });
   } catch (error) {
@@ -406,78 +427,16 @@ app.post('/api/auth/update-profile', authMiddleware, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// Admin Login (password-based)
+// Unified Authentication Logic (Requirement #1 & #7)
 // ═══════════════════════════════════════════════════════════
-app.post('/api/admin/login', async (req, res) => {
-  const { email, password } = req.body;
-  const adminEmail = process.env.ADMIN_EMAIL || 'anilofficial2005@gmail.com';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'Anil@8080';
-
-  // 1. Check Super Admin (env)
-  if (email === adminEmail && password === adminPassword) {
-    const token = signToken({ id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' });
-    console.log('✅ Super Admin login');
-    return res.json({ success: true, token, user: { id: 'admin', email: adminEmail, name: 'Admin', role: 'admin' } });
-  }
-
-  // 2. Auth via Supabase
-  try {
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
-      password
-    });
-
-    if (authError || !authData.user) {
-      console.error('Auth error:', authError?.message);
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    // 3. Verify Role in DB
-    const { data: dbUser, error: dbError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (dbError || !dbUser || dbUser.role !== 'admin') {
-      console.log('Role mismatch or user not found:', dbUser?.role);
-      return res.status(403).json({ success: false, message: 'Not an admin' });
-    }
-
-    console.log('SESSION:', authData.session ? 'Created' : 'Null');
-    console.log('USER:', authData.user.email);
-    console.log('DB USER:', dbUser.email, 'Role:', dbUser.role);
-
-    const token = signToken({ id: dbUser.id, email: dbUser.email, name: dbUser.name, role: 'admin' });
-    res.json({ success: true, token, user: { id: dbUser.id, email: dbUser.email, name: dbUser.name, role: 'admin' } });
-  } catch (err) {
-    console.error('Login exception:', err);
-    res.status(500).json({ success: false, message: 'Server error during login' });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// Doctor Login (Supabase Auth based)
-// ═══════════════════════════════════════════════════════════
-app.post('/api/doctor/login', async (req, res) => {
+async function handleLogin(req, res, targetRole) {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
 
     const trimmedEmail = email.trim().toLowerCase();
-
-    // 1. Verify credentials via Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password,
-    });
-
-    if (authError || !authData?.user) {
-      console.log('Doctor auth failed:', authError?.message);
-      return res.status(401).json({ success: false, message: 'Wrong email or password' });
-    }
-
-    // 2. Fetch user from our users table to check role
+    
+    // 1. Fetch user
     const { data: user, error: dbError } = await supabase
       .from('users')
       .select('*')
@@ -485,34 +444,55 @@ app.post('/api/doctor/login', async (req, res) => {
       .single();
 
     if (dbError || !user) {
-      return res.status(401).json({ success: false, message: 'Doctor account not found in system' });
+      return res.status(401).json({ success: false, message: 'Account not found. Please contact support.' });
     }
 
-    if (user.role !== 'doctor') {
-      return res.status(403).json({ success: false, message: 'This account is not a doctor account' });
+    if (user.role !== targetRole && targetRole !== 'any') {
+      return res.status(403).json({ success: false, message: `Access denied: This account is not a ${targetRole}.` });
     }
 
-    // 3. Generate our custom JWT for the app
-    const token = signToken({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      phone: user.phone,
-      role: 'doctor',
-    });
+    // 2. Validate Password Existence (Requirement #5 & #6)
+    if (!user.password) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Password missing. Please set your password using the "Forgot Password" or invitation link.' 
+      });
+    }
 
-    console.log(`✅ Doctor login: ${user.email}`);
+    // 3. Bcrypt Comparison (Requirement #1)
+    let isMatch = false;
+    try {
+      if (user.password && user.password.startsWith('$2')) {
+        isMatch = await bcrypt.compare(password, user.password);
+      } else if (user.password) {
+        // Fallback for legacy plain-text
+        isMatch = user.password === password;
+      }
+    } catch (err) {
+      console.error('Bcrypt comparison failed:', err.message);
+      isMatch = false;
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Incorrect password.' });
+    }
+
+    // 4. Generate Session
+    const token = signToken({ id: user.id, email: user.email, name: user.name, role: user.role });
     res.json({
       success: true,
-      message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: 'doctor', avatar_url: user.avatar_url || null },
+      user: { id: user.id, email: user.email, name: user.name, role: user.role, avatar_url: user.avatar_url || null }
     });
+
   } catch (err) {
-    console.error('Doctor login error:', err);
-    res.status(500).json({ success: false, message: 'Something went wrong. Please try again.' });
+    console.error(`🔥 Login error for ${targetRole}:`, err.message);
+    res.status(500).json({ success: false, message: 'Internal server error during login' });
   }
-});
+}
+
+app.post('/api/admin/login', (req, res) => handleLogin(req, res, 'admin'));
+app.post('/api/doctor/login', (req, res) => handleLogin(req, res, 'doctor'));
 
 // ═══════════════════════════════════════════════════════════
 // 3. POST /book-appointment
@@ -521,27 +501,27 @@ app.post('/api/doctor/login', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 async function bookAppointment(req, res) {
   try {
-    const { date, time, service, phone, name, email, doctor_id, doctor } = req.body;
-
-    // Add console logs to confirm values before inserting into database
-    console.log('--- Incoming Booking Request ---');
-    console.log('Name:', name);
-    console.log('Email:', email);
-    console.log('Phone:', phone);
-    console.log('Service:', service);
-    console.log('Date:', date);
-    console.log('Time:', time);
-    console.log('Doctor ID:', doctor_id || 'Not specified');
-    console.log('--------------------------------');
-
-    if (!date || !time || !service || !name || !email || !phone) {
-      return res.status(400).json({ success: false, message: 'date, time, service, name, email, and phone are required' });
+    const { date, time, service, phone, name, email, doctor_id } = req.body;
+    
+    // 1. Use user attached by authMiddleware (Requirement #1: Removed supabase.auth.getUser)
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const userId = req.user.id; // From JWT — never from body
+    const user = req.user;
 
+    // 4. Log user.id for debugging (Requirement #4)
+    console.log('--- Appointment Booking Debug ---');
+    console.log('Authenticated User ID:', user.id);
+
+    if (!date || !time || !service || !name || !email || !phone) {
+      return res.status(400).json({ success: false, message: 'All booking fields are required' });
+    }
+
+    // 2. Construct final insert payload (Requirement #2 & #3)
     const insertData = {
-      user_id: userId,
+      user_id: user.id,
+      doctor_id: doctor_id || null,
       date,
       time,
       service,
@@ -567,7 +547,7 @@ async function bookAppointment(req, res) {
       return res.status(500).json({ success: false, message: error.message });
     }
 
-    console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${userId}]`);
+    console.log(`📅 Appointment booked: ${service} on ${date} at ${time} [user: ${user.id}]`);
 
     try {
       console.log("📧 Fetching doctor details...");
@@ -1031,24 +1011,16 @@ app.post('/api/doctor/register', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Invalid invitation status' });
     }
 
-    // 2. Create user in Supabase Auth (using admin API to bypass email confirmation)
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: email.trim().toLowerCase(),
-      password: password,
-      email_confirm: true,
-      user_metadata: { name: invitedUser.name, role: 'doctor' }
-    });
+    // 2. Hash password for local database (Requirement #1 & #2)
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    if (authError) {
-      console.error('❌ Auth registration error:', authError.message);
-      return res.status(500).json({ success: false, message: authError.message });
-    }
+    const userId = invitedUser.id;
 
-    // 3. Update public.users table with the new Auth ID and status='active'
+    // 3. Update public.users table with the password and status='active' (Requirement #7: No Supabase Auth dependency)
     const { error: updateError } = await supabase
       .from('users')
       .update({ 
-        id: authData.user.id, 
+        password: hashedPassword,
         status: 'active' 
       })
       .eq('email', email.trim().toLowerCase());
@@ -1244,81 +1216,141 @@ app.get('/api/doctors', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/auth/reset-password — send reset email
 // ═══════════════════════════════════════════════════════════
+// POST /api/auth/reset-password — send custom reset email
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    console.log(`🔐 Password reset requested for: ${email}`);
+    const trimmedEmail = email.trim().toLowerCase();
+    console.log(`🔐 Custom password reset requested for: ${trimmedEmail}`);
 
-    // Use Supabase built-in reset password functionality as requested
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-      redirectTo: 'https://dental-management-system-sand.vercel.app/reset-password',
-    });
+    // 1. Check if user exists in our database
+    const { data: user, error: fetchErr } = await supabase
+      .from('users')
+      .select('id, email, name')
+      .eq('email', trimmedEmail)
+      .single();
 
-    if (error) {
-      console.error('❌ Supabase resetPasswordForEmail failed:', error.message);
-      return res.status(400).json({ success: false, message: error.message });
+    if (fetchErr || !user) {
+      console.log('❌ Reset password — User not found:', trimmedEmail);
+      // For security, don't reveal if email exists, but the user requested clear messages.
+      // Given the context, we'll return an error.
+      return res.status(404).json({ success: false, message: 'Account not found. Please check your email.' });
     }
 
-    console.log(`✅ Supabase reset email triggered for: ${email}`);
-    res.json({ success: true, message: 'Password reset email has been sent by Supabase to ' + email });
+    // 2. Generate a secure random token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000); // 1 hour from now
+
+    // 3. Save token to database (Requirement #1 & #2: reset_token_expiry)
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ 
+        reset_token: resetToken, 
+        reset_token_expiry: resetExpires.toISOString() 
+      })
+      .eq('id', user.id);
+
+    if (updateErr) {
+      console.error('❌ Failed to save reset token:', updateErr.message);
+      return res.status(500).json({ success: false, message: 'Database error: ' + updateErr.message });
+    }
+
+    // 4. Send custom email (Requirement #3)
+    const resetUrl = `https://dental-management-system-sand.vercel.app/reset-password?token=${resetToken}`;
+    const emailSent = await sendEmail(
+      trimmedEmail,
+      "Reset Your Password - Clinical Serenity",
+      `
+<div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+  <h2 style="color: #2e7d6b; text-align: center;">Password Reset Request</h2>
+  <p>Hello ${user.name || 'there'},</p>
+  <p>We received a request to reset your password for your Clinical Serenity account.</p>
+  <p>Please click the button below to set a new password. This link will expire in 1 hour.</p>
+  <div style="text-align: center; margin: 30px 0;">
+    <a href="${resetUrl}" style="background-color: #2e7d6b; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset Password</a>
+  </div>
+  <p style="font-size: 12px; color: #666;">If you didn't request this, you can safely ignore this email.</p>
+  <hr style="border: none; border-top: 1px solid #eee; margin-top: 30px;" />
+  <p style="font-size: 10px; color: #aaa; text-align: center;">© Clinical Serenity Dental Clinic</p>
+</div>
+`
+    );
+
+    if (emailSent) {
+      console.log(`✅ Custom reset email sent to: ${trimmedEmail}`);
+      res.json({ success: true, message: 'Password reset instructions have been sent to your email.' });
+    } else {
+      console.error('❌ Failed to send reset email');
+      res.status(500).json({ success: false, message: 'Failed to send reset email. Please contact support.' });
+    }
+
   } catch (err) {
-    console.error('❌ SERVER ERROR — Reset password:', err);
-    res.status(500).json({ success: false, message: 'Server error: ' + (err.message || 'Unknown error') });
+    console.error('❌ SERVER ERROR — Reset password:', err.message);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 });
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/auth/complete-reset-password — finalize password reset
 // ═══════════════════════════════════════════════════════════
+// POST /api/auth/complete-reset-password — finalize custom password reset (Requirement #2)
 app.post('/api/auth/complete-reset-password', async (req, res) => {
   try {
-    const { password, access_token } = req.body;
-    if (!password || !access_token) {
+    const { password, token } = req.body;
+
+    if (!password || !token) {
       return res.status(400).json({ success: false, message: 'Password and token are required' });
     }
 
-    // 1. Get user from Supabase using the access token
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(access_token);
-    if (authErr || !user) {
-      console.error('❌ Reset password — Invalid token:', authErr?.message);
-      return res.status(401).json({ success: false, message: 'Invalid or expired session. Please request a new link.' });
+    console.log('🔑 Finalizing password reset with token...');
+
+    // 1. Find user by reset token (Requirement #2)
+    const { data: user, error: fetchErr } = await supabase
+      .from('users')
+      .select('*')
+      .eq('reset_token', token)
+      .single();
+
+    if (fetchErr || !user) {
+      console.error('❌ Reset password — Invalid token (Requirement #6)');
+      return res.status(401).json({ success: false, message: 'Invalid token. Please request a new link.' });
     }
 
-    console.log(`🔐 Completing password reset for: ${user.email}`);
-
-    // 2. Update password in Supabase Auth (using service role to ensure success)
-    const { error: updateAuthErr } = await supabase.auth.admin.updateUserById(user.id, {
-      password: password
-    });
-
-    if (updateAuthErr) {
-      console.error('❌ Reset password — Supabase Auth update failed:', updateAuthErr.message);
-      return res.status(500).json({ success: false, message: 'Failed to update Auth password: ' + updateAuthErr.message });
+    // 2. Check expiry (Requirement #6)
+    if (new Date() > new Date(user.reset_token_expiry)) {
+      console.error('❌ Reset password — Token expired for:', user.email);
+      return res.status(401).json({ success: false, message: 'Token expired. Please request a new one.' });
     }
 
-    // 3. Upsert user into public.users table based on user_metadata
-    const { error: updateDbErr } = await supabase.from("users").upsert({
-      id: user.id,
-      email: user.email,
-      name: user.user_metadata?.name || 'Admin User',
-      role: user.user_metadata?.role === 'admin' ? 'admin' : (user.user_metadata?.role || 'admin')
-    }, { onConflict: 'id' });
+    console.log(`🔐 Hashing and saving new password for: ${user.email}`);
 
-    if (updateDbErr) {
-      console.error('❌ Reset password — public.users upsert failed:', updateDbErr.message);
+    // 3. Update password with hashing (Requirement #2)
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ 
+        password: hashedPassword,
+        reset_token: null,
+        reset_token_expiry: null
+      })
+      .eq('id', user.id);
+
+    if (updateErr) {
+      console.error('❌ Reset password — Database update failed:', updateErr.message);
+      return res.status(500).json({ success: false, message: 'Database error: ' + updateErr.message });
     }
 
-    console.log(`✅ Password reset complete for: ${user.email}`);
+    console.log(`✅ Password reset successfully completed for: ${user.email}`);
     res.json({
       success: true,
-      message: 'Your password has been reset successfully.',
-      role: user.user_metadata?.role || 'user'
+      message: 'Your password has been reset successfully. You can now log in.'
     });
+
   } catch (err) {
-    console.error('❌ SERVER ERROR — Complete reset password:', err);
-    res.status(500).json({ success: false, message: 'Server error during password reset' });
+    console.error('❌ SERVER ERROR — Complete reset password:', err.message);
+    res.status(500).json({ success: false, message: 'Server error during password reset: ' + err.message });
   }
 });
 
