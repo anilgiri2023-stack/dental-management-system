@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../utils/api';
+import { sendOtp as apiSendOtp, verifyOtp as apiVerifyOtp } from '../api';
 
 const AuthContext = createContext(null);
 
@@ -79,10 +80,7 @@ export function AuthProvider({ children }) {
     if (process.env.NODE_ENV === 'development') {
       console.log(`📧 Sending OTP to ${identifier} (${type})`);
     }
-    return apiFetch('/api/auth/send-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email: identifier, type }),
-    });
+    return apiSendOtp(identifier);
   };
 
   // Verify OTP and login — returns user with role
@@ -92,10 +90,7 @@ export function AuthProvider({ children }) {
 
     // Helper: attempt verification with retry
     async function attemptVerify(retryCount = 0) {
-      const data = await apiFetch('/api/auth/verify-otp', {
-        method: 'POST',
-        body: JSON.stringify({ email: identifier, type, otp, name, phone }),
-      });
+      const data = await apiVerifyOtp(identifier, otp);
 
       console.log('📦 verify-otp response:', { 
         success: data.success, 
