@@ -75,12 +75,12 @@ export default function LoginPage() {
         setIsNewUser(false);
         setLoading(true);
         try {
-          await sendOtp(identifier.trim(), 'email');
+          const otpResult = await sendOtp(identifier.trim(), 'email');
           setStep('otp');
           setOtp(Array(OTP_LENGTH).fill(''));
           setResendTimer(RESEND_COOLDOWN);
           setLoginCooldown(RESEND_COOLDOWN);
-          setSuccess(result.message || `Welcome back! Code sent to ${identifier}`);
+          setSuccess(otpResult.message || `Welcome back! Code sent to ${identifier}`);
           setTimeout(() => otpRefs.current[0]?.focus(), 100);
         } catch (otpErr) {
           const isRateLimit = 
@@ -122,12 +122,12 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      await sendOtp(identifier.trim(), 'email');
+      const otpResult = await sendOtp(identifier.trim(), 'email');
       setStep('otp');
       setOtp(Array(OTP_LENGTH).fill(''));
       setResendTimer(RESEND_COOLDOWN);
       setLoginCooldown(RESEND_COOLDOWN);
-      setSuccess(result.message || `Verification code sent to ${identifier}`);
+      setSuccess(otpResult.message || `Verification code sent to ${identifier}`);
       setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } catch (err) {
       const isRateLimit = 

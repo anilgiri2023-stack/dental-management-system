@@ -8,7 +8,17 @@ function normalizeApiUrl(url) {
 export const API_BASE_URL = normalizeApiUrl(configuredApiUrl);
 
 function apiUrl(endpoint) {
-  const path = endpoint.startsWith('/api/') ? endpoint : `/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  // If endpoint is already a full URL, return it
+  if (endpoint.startsWith('http')) return endpoint;
+  
+  let path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // The backend uses root routes for OTP: /send-otp and /verify-otp
+  // Other routes should have /api/ prefix if not present
+  if (!path.startsWith('/send-otp') && !path.startsWith('/verify-otp') && !path.startsWith('/api/')) {
+    path = `/api${path}`;
+  }
+  
   return `${API_BASE_URL}${path}`;
 }
 
