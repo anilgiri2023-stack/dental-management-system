@@ -21,6 +21,7 @@ dotenv.config(); // Must be called before local imports
 
 const { sendEmail, sendOTP } = require('./utils/emailService');
 const authRoutes = require('./routes/authRoutes');
+const protect = require('./middleware/authMiddleware');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -2099,6 +2100,17 @@ app.get('/api/doctor/patients', authMiddleware, doctorOnly, async (req, res) => 
 // ═══════════════════════════════════════════════════════════
 // Health check
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// GET /api/protected — Secure endpoint
+// ═══════════════════════════════════════════════════════════
+app.get('/api/protected', protect, (req, res) => {
+  res.json({
+    success: true,
+    message: "You are logged in",
+    user: req.user
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT });
 });
