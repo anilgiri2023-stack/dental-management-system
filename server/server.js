@@ -20,6 +20,7 @@ dns.setDefaultResultOrder("ipv4first");
 dotenv.config(); // Must be called before local imports
 
 const { sendEmail, sendOTP } = require('./utils/emailService');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -27,6 +28,9 @@ const PORT = process.env.PORT || 5000;
 // ─── Middleware ───────────────────────────────────────────
 app.use(cors({ origin: '*' }));
 app.use(express.json());
+
+// ─── Auth Routes ──────────────────────────────────────────
+app.use('/api/auth', authRoutes);
 
 // ─── Supabase (Service Role — bypasses RLS) ──────────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -293,171 +297,6 @@ const upload = multer({
       cb(new Error(`File type "${file.mimetype}" is not allowed. Only PDF, JPG, and PNG files are accepted.`));
     }
   },
-});
-
-// ═══════════════════════════════════════════════════════════
-// 1. POST /api/auth/send-otp (In-memory OTP logic with Brevo API)
-// ═══════════════════════════════════════════════════════════
-const otpStore = new Map(); // Using Map instead of object for better management
-const MANUAL_OTP_EXPIRY = 5 * 60 * 1000; // 5 minutes as requested
-
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-app.post('/api/auth/send-otp', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email is required'
-      });
-    }
-
-    const emailKey = email.trim().toLowerCase();
-    const now = Date.now();
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    otpStore.set(emailKey, {
-      otp,
-      expiresAt: now + 5 * 60 * 1000
-    });
-
-    await sendOTP(emailKey, otp);
-
-    return res.json({
-      success: true,
-      message: "OTP sent successfully"
-    });
-
-  } catch (error) {
-    console.error("OTP ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Email send failed"
-    });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// 2. POST /api/auth/verify-otp
-// ═══════════════════════════════════════════════════════════
-app.post('/api/auth/verify-otp', async (req, res) => {
-  try {
-    // identifier and otp are sometimes used by frontend
-    const { email, identifier, otp, otp: otpVal, name, phone } = req.body;
-    const finalEmail = (email || identifier || '').trim().toLowerCase();
-    const finalOtp = (otp || otpVal || '').trim();
-
-    if (!finalEmail || !finalOtp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
-
-    const now = Date.now();
-
-    // 1. Check if record exists
-    if (!otpStore.has(finalEmail)) {
-      return res.status(400).json({ success: false, message: 'No verification code found. Please request a new one.' });
-    }
-
-    const record = otpStore.get(finalEmail);
-
-    // 2. Check if expired
-    if (now > record.expiresAt) {
-      otpStore.delete(finalEmail);
-      return res.status(400).json({ success: false, message: 'Verification code expired. Please request a new one.' });
-    }
-
-    // 3. Check if match
-    if (record.otp !== finalOtp) {
-      return res.status(400).json({ success: false, message: 'Invalid verification code.' });
-    }
-
-    console.log(`✅ OTP verified for: ${finalEmail}`);
-    otpStore.delete(finalEmail); // Cleanup after success
-
-    // 4. User session logic (Supabase Sync)
-    // Find or create user in Supabase Auth via Admin API
-    const { data: usersData } = await supabase.auth.admin.listUsers();
-    let authUser = (usersData?.users || []).find(u => u.email === finalEmail);
-
-    if (!authUser) {
-      console.log(`🆕 Creating new auth user for: ${finalEmail}`);
-      const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
-        email: finalEmail,
-        email_confirm: true,
-        user_metadata: { name: name || 'User' }
-      });
-      if (createErr) throw createErr;
-      authUser = newUser.user;
-    }
-
-    if (!authUser) {
-      return res.status(401).json({ success: false, message: 'Authentication failed. Please try again.' });
-    }
-
-    // Find or create user in "users" table
-    const { data: existingUser, error: fetchErr } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', finalEmail)
-      .single();
-
-    let user;
-    if (existingUser) {
-      user = existingUser;
-      // Update name/phone if provided
-      let updates = {};
-      if (name && user.name !== name) updates.name = name;
-      if (phone && user.phone !== phone) updates.phone = phone;
-
-      if (Object.keys(updates).length > 0) {
-        const { data: updatedUser } = await supabase.from('users').update(updates).eq('id', user.id).select().single();
-        if (updatedUser) user = updatedUser;
-      }
-    } else {
-      // Create new user in public.users linked to auth user ID
-      const { data: newUser, error: createErr } = await supabase
-        .from('users')
-        .insert([{
-          id: authUser.id,
-          email: finalEmail,
-          name: name || 'User',
-          phone: phone || 'N/A',
-          role: 'user'
-        }])
-        .select()
-        .single();
-
-      if (createErr) {
-        console.error('❌ Create user error:', createErr.message);
-        return res.status(500).json({ success: false, message: 'Failed to create user profile' });
-      }
-      user = newUser;
-    }
-
-    // Generate session token
-    const token = signToken({
-      id: user.id,
-      email: user.email,
-      role: user.role || 'user',
-    });
-
-    // Sync role to Supabase Auth metadata for public.users independence
-    await supabase.auth.admin.updateUserById(authUser.id, {
-      user_metadata: { role: user.role || 'user', name: user.name }
-    });
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: { id: user.id, email: user.email, name: user.name, phone: user.phone, role: user.role || 'user' },
-    });
-  } catch (error) {
-    console.error('Verify OTP error:', error);
-    res.status(500).json({ success: false, message: 'Verification failed' });
-  }
 });
 
 // ═══════════════════════════════════════════════════════════
