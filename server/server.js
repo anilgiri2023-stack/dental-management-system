@@ -296,7 +296,7 @@ const upload = multer({
 });
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /api/auth/send-otp (In-memory OTP logic with Brevo SMTP)
+// 1. POST /api/auth/send-otp (In-memory OTP logic with Brevo API)
 // ═══════════════════════════════════════════════════════════
 const otpStore = new Map(); // Using Map instead of object for better management
 const MANUAL_OTP_EXPIRY = 5 * 60 * 1000; // 5 minutes as requested
@@ -307,8 +307,6 @@ function generateOTP() {
 
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
-    console.log("🔥 SEND OTP ROUTE HIT");
-
     const { email } = req.body;
     if (!email) {
       return res.status(400).json({
@@ -320,16 +318,6 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const emailKey = email.trim().toLowerCase();
     const now = Date.now();
 
-    console.log(`📨 OTP request for: ${emailKey}`);
-
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error("❌ SMTP ENV MISSING");
-      return res.status(500).json({
-        success: false,
-        message: 'SMTP config missing'
-      });
-    }
-
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     otpStore.set(emailKey, {
@@ -337,30 +325,18 @@ app.post('/api/auth/send-otp', async (req, res) => {
       expiresAt: now + 5 * 60 * 1000
     });
 
-    console.log(`🔐 OTP: ${otp}`);
-
-    const result = await sendOTP(emailKey, otp);
-
-    if (!result.success) {
-      console.error("❌ EMAIL FAILED:", result.error);
-      return res.status(500).json({
-        success: false,
-        message: 'Email send failed'
-      });
-    }
-
-    console.log("✅ OTP SENT SUCCESS");
+    await sendOTP(emailKey, otp);
 
     return res.json({
       success: true,
-      message: 'OTP sent successfully'
+      message: "OTP sent successfully"
     });
 
-  } catch (err) {
-    console.error("🔥 SEND OTP ERROR:", err);
+  } catch (error) {
+    console.error("OTP ERROR:", error);
     return res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: "Email send failed"
     });
   }
 });
