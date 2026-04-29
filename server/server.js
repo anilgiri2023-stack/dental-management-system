@@ -373,8 +373,7 @@ app.post('/send-otp', async (req, res) => {
     </p>
   </div>
 </div>
-`
-      );
+`});
 
       if (emailResult.success) {
         console.log(`✅ Verification email sent to ${emailKey}`);
