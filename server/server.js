@@ -19,19 +19,10 @@ dns.setDefaultResultOrder("ipv4first");
 
 dotenv.config(); // Must be called before local imports
 
-const { sendEmail, transporter } = require('./services/emailService');
+const { sendEmail } = require('./utils/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Add transporter.verify() at server start
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("SMTP connection failed:", error);
-  } else {
-    console.log("SMTP server is ready");
-  }
-});
 
 // ─── Middleware ───────────────────────────────────────────
 app.use(cors({ origin: '*' }));
@@ -90,12 +81,6 @@ function formatAppointmentDate(dateValue) {
   });
 }
 
-function logSmtpConfig(context = 'SMTP') {
-  console.log(`${context} SMTP_HOST:`, process.env.SMTP_HOST || 'MISSING');
-  console.log(`${context} SMTP_PORT:`, process.env.SMTP_PORT || 'MISSING');
-  console.log(`${context} SMTP_USER:`, process.env.SMTP_USER || 'MISSING');
-}
-
 async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
   if (!patientEmail) {
     console.log('📧 Report email skipped: patient email missing');
@@ -149,17 +134,14 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
 </div>
 `;
 
-  try {
-    const info = await transporter.sendMail({
-      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-      to: patientEmail,
-      subject: "Your Medical Report is Ready 🧾",
-      html: reportHtmlTemplate,
-    });
-    console.log("✅ Report email sent successfully:", info.response);
-  } catch (error) {
-    console.error("❌ Failed to send report email:", error);
-  }
+  // Non-blocking call to Resend
+  sendEmail({
+    to: patientEmail,
+    subject: "Your Medical Report is Ready 🧾",
+    html: reportHtmlTemplate,
+  }).catch(err => {
+    console.error("❌ Failed to send report email:", err);
+  });
 }
 
 console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
@@ -346,19 +328,19 @@ app.post('/send-otp', async (req, res) => {
     // 2. Manual OTP logic (Bypassing Supabase Auth OTP to avoid rate limits/SMTP issues)
     console.log('  -> Generating manual OTP...');
     
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ SMTP credentials missing. Cannot send manual OTP.');
-      return res.status(500).json({ success: false, message: 'Server configuration error: SMTP credentials missing.' });
+    if (!process.env.RESEND_API_KEY) {
+      console.error('❌ RESEND_API_KEY missing. Cannot send manual OTP.');
+      return res.status(500).json({ success: false, message: 'Server configuration error: Email API key missing.' });
     }
 
     try {
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
 
-      const emailSent = await sendEmail(
-        emailKey,
-        "Your Verification Code - Clinical Serenity",
-        `
+      const emailResult = await sendEmail({
+        to: emailKey,
+        subject: "Your Verification Code - Clinical Serenity",
+        html: `
 <div style="font-family: 'Segoe UI', sans-serif; background:#f4f7fb; padding:30px;">
   <div style="max-width:500px;margin:auto;background:white;border-radius:12px;padding:30px;box-shadow:0 6px 25px rgba(0,0,0,0.1);text-align:center;">
     
@@ -394,7 +376,7 @@ app.post('/send-otp', async (req, res) => {
 `
       );
 
-      if (emailSent) {
+      if (emailResult.success) {
         console.log(`✅ Verification email sent to ${emailKey}`);
         otpThrottle.set(emailKey, now);
         return res.json({
@@ -864,13 +846,15 @@ async function bookAppointment(req, res) {
 </div>
 `;
 
-      await sendEmail(
-        email,
-        "Appointment Confirmation - Clinical Serenity",
-        htmlContent
-      );
+      sendEmail({
+        to: email,
+        subject: "Appointment Confirmation - Clinical Serenity",
+        html: htmlContent
+      }).catch(err => {
+        console.error("❌ Appointment email failed:", err);
+      });
 
-      console.log("✅ Appointment email sent");
+      console.log("✅ Appointment email initiated");
     } catch (err) {
       console.error("❌ Appointment email failed:", err);
     }
@@ -1166,14 +1150,16 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
 </div>
 `;
 
-    const info = await transporter.sendMail({
-      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+    // Replace the transporter.sendMail call with sendEmail from Resend
+    sendEmail({
       to: recipientEmail,
       subject,
       html: htmlTemplate,
+    }).catch(err => {
+      console.error("❌ Appointment status email failed:", err);
     });
-    console.log("✅ Appointment status email sent successfully:", info.response);
 
+    console.log("✅ Appointment status email initiation logged.");
     res.json({ success: true });
   } catch (error) {
     console.error('Appointment status notification error:', error);
@@ -1365,11 +1351,11 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
 
     console.log('📧 Sending custom doctor invitation to:', email);
 
-    // 2. Send Invitation Email using existing emailService
-    const emailSent = await sendEmail(
-      email.trim().toLowerCase(),
-      "You're invited as a Doctor - Clinical Serenity",
-      `
+    // 2. Send Invitation Email using Resend
+    sendEmail({
+      to: email.trim().toLowerCase(),
+      subject: "You're invited as a Doctor - Clinical Serenity",
+      html: `
 <div style="font-family: Arial, sans-serif; padding:30px; background:#f4f7fb;">
   <div style="max-width:600px; margin:auto; background:white; border-radius:12px; padding:30px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
     <h2 style="color:#2e7d6b;">Clinical Serenity</h2>
@@ -1395,11 +1381,9 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
   </div>
 </div>
 `
-    );
-
-    if (!emailSent) {
-      return res.status(500).json({ success: false, message: 'Failed to send invitation email. Please check SMTP settings.' });
-    }
+    }).catch(err => {
+      console.error('❌ Failed to send doctor invite email:', err);
+    });
 
     // 3. Upsert into public.users table (allows re-inviting or updating existing user)
     // We use email as conflict target since we don't have a Supabase Auth ID yet
@@ -1415,10 +1399,10 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
 
     if (upsertError) {
       console.error('UPSERT USER FAILED:', upsertError);
-      return res.status(500).json({ success: false, message: 'Email sent, but failed to record invitation in database' });
+      return res.status(500).json({ success: false, message: 'Doctor invited, but failed to record in database' });
     }
 
-    res.json({ success: true, message: 'Doctor invitation email sent successfully to ' + email });
+    res.json({ success: true, message: 'Doctor invitation initiated successfully' });
   } catch (error) {
     console.error('SERVER ERROR — Invite doctor:', error);
     res.status(500).json({ success: false, message: 'Server error during invite' });
@@ -1581,21 +1565,14 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
   </div>
 </div>`;
 
-    // Non-blocking email sending with detailed logging
-    (async () => {
-      try {
-        console.log("Sending email to:", adminEmail);
-        const info = await transporter.sendMail({
-          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-          to: adminEmail,
-          subject: 'Admin Invitation - Clinical Serenity',
-          html: inviteHtml,
-        });
-        console.log("✅ Admin invitation email sent successfully:", info.response);
-      } catch (err) {
-        console.error("Email error:", err);
-      }
-    })();
+    // Non-blocking email sending via Resend service
+    sendEmail({
+      to: adminEmail,
+      subject: "You're invited as Admin - Clinical Serenity",
+      html: inviteHtml,
+    }).catch(err => {
+      console.error("Email error:", err);
+    });
 
     return res.json({ success: true, message: "Admin invited successfully" });
 
@@ -1776,12 +1753,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Database error: ' + updateErr.message });
     }
 
-    // 4. Send custom email (Requirement #3)
+    // 4. Send custom email using Resend
     const resetUrl = `https://dental-management-system-sand.vercel.app/reset-password?token=${resetToken}`;
-    const emailSent = await sendEmail(
-      trimmedEmail,
-      "Reset Your Password - Clinical Serenity",
-      `
+    const emailResult = await sendEmail({
+      to: trimmedEmail,
+      subject: "Reset Your Password - Clinical Serenity",
+      html: `
 <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
   <h2 style="color: #2e7d6b; text-align: center;">Password Reset Request</h2>
   <p>Hello ${user.name || 'there'},</p>
@@ -1793,15 +1770,14 @@ app.post('/api/auth/reset-password', async (req, res) => {
   <p style="font-size: 12px; color: #666;">If you didn't request this, you can safely ignore this email.</p>
   <hr style="border: none; border-top: 1px solid #eee; margin-top: 30px;" />
   <p style="font-size: 10px; color: #aaa; text-align: center;">© Clinical Serenity Dental Clinic</p>
-</div>
-`
-    );
+</div>`
+    });
 
-    if (emailSent) {
+    if (emailResult.success) {
       console.log(`✅ Custom reset email sent to: ${trimmedEmail}`);
       res.json({ success: true, message: 'Password reset instructions have been sent to your email.' });
     } else {
-      console.error('❌ Failed to send reset email');
+      console.error('❌ Failed to send reset email:', emailResult.error);
       res.status(500).json({ success: false, message: 'Failed to send reset email. Please contact support.' });
     }
 
@@ -2378,66 +2354,19 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT });
 });
 
-// GET /api/test-email — verify SMTP config and Nodemailer delivery
+// GET /api/test-email — verify Resend delivery
 app.get('/api/test-email', async (req, res) => {
   try {
-    logSmtpConfig('TEST_EMAIL');
-
-    if (!process.env.SMTP_HOST || !process.env.SMTP_PORT || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      return res.status(500).json({
-        success: false,
-        message: 'SMTP configuration is incomplete',
-      });
-    }
-
-    const to = (req.query.to || process.env.SMTP_USER || '').toString().trim();
-    if (!to) {
-      return res.status(400).json({ success: false, message: 'Missing test recipient email' });
-    }
-
-    const html = `
-<div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:24px;">
-  <div style="max-width:600px; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
-    <div style="background:#0f766e; padding:24px 20px; text-align:center;">
-      <h2 style="color:#ffffff; margin:0;">Clinical Serenity</h2>
-    </div>
-    <div style="padding:30px; color:#1f2937;">
-      <h3 style="margin-top:0;">SMTP Test Email</h3>
-      <p>This confirms your Node.js backend can send email through the configured SMTP server.</p>
-      <div style="margin:20px 0; padding:15px; background:#f1f5f9; border-radius:8px;">
-        Sent at ${escapeHtml(new Date().toISOString())}
-      </div>
-    </div>
-    <div style="background:#f9fafb; text-align:center; padding:15px; font-size:12px; color:#777;">
-      © Clinical Serenity. All rights reserved.
-    </div>
-  </div>
-</div>`;
-
-    const info = await transporter.sendMail({
-      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
-      to,
-      subject: 'Clinical Serenity SMTP Test',
-      html,
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL,
+      subject: "Test Email - Clinical Serenity",
+      html: "<h2>Resend is working ✅</h2>",
     });
 
-    console.log('TEST_EMAIL sendMail success:', {
-      messageId: info.messageId,
-      response: info.response,
-      to,
-    });
-
-    res.json({ success: true, messageId: info.messageId });
-  } catch (error) {
-    console.error('TEST_EMAIL sendMail failed:', {
-      message: error.message,
-      response: error.response,
-      responseCode: error.responseCode,
-      command: error.command,
-      code: error.code,
-      stack: error.stack,
-    });
-    res.status(500).json({ success: false, message: error.message || 'Failed to send test email' });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Test email error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
