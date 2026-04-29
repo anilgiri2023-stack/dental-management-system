@@ -1486,58 +1486,76 @@ app.post('/api/doctor/register', async (req, res) => {
 // POST /api/admin/invite-admin — admin only
 // ═══════════════════════════════════════════════════════════
 app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) => {
-  console.log("Invite Admin API HIT");
   try {
-    const { email, name } = req.body;
-    if (!email || !name) {
-      return res.status(400).json({ success: false, message: 'Email and name are required' });
+    const { name, email } = req.body;
+    console.log("Invite request:", { name, email });
+
+    // 1. Validation
+    if (!name || !email) {
+      return res.status(400).json({ error: "Name and email are required" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: "Invalid email format" });
     }
 
     const adminEmail = email.trim().toLowerCase();
     const adminName = name.trim();
-    const frontendUrl = (process.env.FRONTEND_URL || 'https://dental-management-system-sand.vercel.app').replace(/\/+$/, '');
-    const setPasswordUrl = `${frontendUrl}/set-password`;
+    // Generate a random secure password
+    const tempPassword = crypto.randomBytes(12).toString('hex') + "A1!"; 
 
-    // 1. Invite user via Supabase Auth Admin API
-    const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
-      adminEmail,
-      {
-        data: { name: adminName, role: 'admin' },
-        redirectTo: setPasswordUrl
-      }
-    );
+    // Step 1: Create admin user (Supabase)
+    const { data: userData, error: createError } = await supabase.auth.admin.createUser({
+      email: adminEmail,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: { name: adminName, role: 'admin' }
+    });
 
-    if (inviteError) {
-      console.error('SUPABASE INVITE ADMIN FAILED:', {
-        message: inviteError.message,
-        status: inviteError.status,
-        code: inviteError.code,
-        stack: inviteError.stack,
-      });
-      return res.status(500).json({ success: false, message: inviteError.message || 'Failed to send invitation' });
+    if (createError) {
+      console.error("User creation error:", createError);
+      return res.status(500).json({ error: "User creation failed: " + createError.message });
     }
 
-    const authUser = inviteData.user;
+    const authUser = userData.user;
 
-    // 2. Upsert into public.users table
-    const { error: upsertError } = await supabase
-      .from('users')
-      .upsert({
-        id: authUser.id,
-        email: adminEmail,
-        name: adminName,
-        role: 'admin',
-        phone: 'N/A'
-      }, { onConflict: 'id' });
-
-    if (upsertError) {
-      console.error('UPSERT ADMIN FAILED:', upsertError);
-      return res.status(500).json({ success: false, message: 'Admin invited, but failed to sync to database' });
-    }
-
+    // Step 2: Database sync with safe check (avoid trigger conflicts)
     try {
-      logSmtpConfig('INVITE_ADMIN');
-      const inviteHtml = `
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (!existingUser) {
+        const { error: syncError } = await supabase
+          .from('users')
+          .insert([{
+            id: authUser.id,
+            email: adminEmail,
+            name: adminName,
+            role: 'admin',
+            phone: 'N/A'
+          }]);
+
+        if (syncError) {
+          console.error("Database sync error (non-fatal):", syncError);
+        } else {
+          console.log("Admin synced to public.users table");
+        }
+      } else {
+        console.log("Admin already exists in public.users, skipping sync");
+      }
+    } catch (dbErr) {
+      console.error("Database sync exception (non-fatal):", dbErr);
+    }
+
+    // Step 3: Send email (non-blocking)
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://dental-management-system-sand.vercel.app').replace(/\/+$/, '');
+    const loginUrl = `${frontendUrl}/login`;
+
+    const inviteHtml = `
 <div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:24px;">
   <div style="max-width:600px; margin:auto; background:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 4px 18px rgba(15,23,42,0.12);">
     <div style="background:#0f766e; padding:24px 20px; text-align:center;">
@@ -1545,10 +1563,15 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
     </div>
     <div style="padding:30px; color:#1f2937;">
       <h3 style="margin-top:0;">Hello ${escapeHtml(adminName)},</h3>
-      <p>You have been invited to join Clinical Serenity as an administrator.</p>
-      <p>Please use the invitation email from Clinical Serenity to set your password. You can also open the password setup page below.</p>
+      <p>You have been invited to join <b>Clinical Serenity</b> as an administrator.</p>
+      <p>Your account has been created. You can log in using the credentials below:</p>
+      <div style="background:#f1f5f9; padding:15px; border-radius:8px; margin:20px 0;">
+        <p style="margin:5px 0;"><b>Email:</b> ${adminEmail}</p>
+        <p style="margin:5px 0;"><b>Temporary Password:</b> <code style="background:#e2e8f0; padding:2px 5px; border-radius:4px;">${tempPassword}</code></p>
+      </div>
+      <p>Please log in and change your password immediately.</p>
       <div style="margin:28px 0; text-align:center;">
-        <a href="${escapeHtml(setPasswordUrl)}" style="display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:13px 22px; border-radius:8px; font-weight:bold;">Set Password</a>
+        <a href="${escapeHtml(loginUrl)}" style="display:inline-block; background:#0f766e; color:#ffffff; text-decoration:none; padding:13px 22px; border-radius:8px; font-weight:bold;">Log In Now</a>
       </div>
       <p style="font-size:13px; color:#6b7280;">If you were not expecting this invitation, you can ignore this email.</p>
     </div>
@@ -1558,37 +1581,23 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
   </div>
 </div>`;
 
-      const mailInfo = await transporter.sendMail({
-        from: getMailFrom(),
-        to: adminEmail,
-        subject: 'You are invited to Clinical Serenity Admin',
-        html: inviteHtml,
-      });
-      console.log('INVITE_ADMIN email sent:', {
-        messageId: mailInfo.messageId,
-        response: mailInfo.response,
-        to: adminEmail,
-      });
-    } catch (mailError) {
-      console.error('INVITE_ADMIN sendMail failed:', {
-        message: mailError.message,
-        response: mailError.response,
-        responseCode: mailError.responseCode,
-        command: mailError.command,
-        code: mailError.code,
-        stack: mailError.stack,
-      });
-    }
-
-    res.json({ success: true, message: 'Admin invited successfully. Email sent to ' + adminEmail });
-  } catch (error) {
-    console.error('SERVER ERROR — Invite admin:', {
-      message: error.message,
-      stack: error.stack,
-      response: error.response,
-      responseCode: error.responseCode,
+    // Non-blocking email sending
+    transporter.sendMail({
+      from: getMailFrom(),
+      to: adminEmail,
+      subject: 'Admin Invitation - Clinical Serenity',
+      html: inviteHtml,
+    }).then(info => {
+      console.log('INVITE_ADMIN email sent successfully:', info.messageId);
+    }).catch(mailErr => {
+      console.error('INVITE_ADMIN email failed (non-blocking):', mailErr);
     });
-    res.status(500).json({ success: false, message: 'Server error during admin invite' });
+
+    return res.json({ success: true, message: "Admin invited successfully" });
+
+  } catch (err) {
+    console.error("Invite admin fatal error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
