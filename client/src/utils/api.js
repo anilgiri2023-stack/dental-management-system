@@ -13,9 +13,8 @@ function apiUrl(endpoint) {
   
   let path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // The backend uses root routes for OTP: /send-otp and /verify-otp
-  // Other routes should have /api/ prefix if not present
-  if (!path.startsWith('/send-otp') && !path.startsWith('/verify-otp') && !path.startsWith('/api/')) {
+  // Ensure path starts with /api/ if it's a relative path and not already prefixed
+  if (!path.startsWith('/api/')) {
     path = `/api${path}`;
   }
   

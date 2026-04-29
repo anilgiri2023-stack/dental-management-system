@@ -6,9 +6,9 @@ async function test() {
   console.log('║     FULL E2E TEST — 6 ENDPOINTS       ║');
   console.log('╚═══════════════════════════════════════╝\n');
 
-  // 1. POST /send-otp
-  console.log('=== 1. POST /send-otp ===');
-  const r1 = await fetch(BASE + '/send-otp', {
+  // 1. POST /api/auth/send-otp
+  console.log('=== 1. POST /api/auth/send-otp ===');
+  const r1 = await fetch(BASE + '/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'anilofficial2005@gmail.com' }),
@@ -22,14 +22,14 @@ async function test() {
 
   // We need to get the OTP from server console. Since we can't, let's send another
   // and use the direct OTP store approach. For testing, let's use the /api/auth routes too.
-  console.log('=== 2. POST /verify-otp (need OTP from server console) ===');
+  console.log('=== 2. POST /api/auth/verify-otp (need OTP from server console) ===');
   console.log('  → Sending new OTP...');
   
   // Send OTP via /api/auth/send-otp (frontend-compatible alias)
   const r1b = await fetch(BASE + '/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier: 'anilofficial2005@gmail.com', type: 'email' }),
+    body: JSON.stringify({ email: 'anilofficial2005@gmail.com' }),
   });
   const d1b = await r1b.json();
   console.log('  /api/auth/send-otp status:', r1b.status);

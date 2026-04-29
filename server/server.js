@@ -2220,8 +2220,8 @@ app.listen(PORT, async () => {
 
   console.log('');
   console.log('📋 Routes:');
-  console.log('  POST /send-otp');
-  console.log('  POST /verify-otp');
+  console.log('  POST /api/auth/send-otp');
+  console.log('  POST /api/auth/verify-otp');
   console.log('  GET  /api/test-admin');
   console.log('  POST /book-appointment');
   console.log('  GET  /my-appointments');

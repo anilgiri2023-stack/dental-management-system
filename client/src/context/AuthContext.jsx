@@ -79,7 +79,7 @@ export function AuthProvider({ children }) {
     if (process.env.NODE_ENV === 'development') {
       console.log(`📧 Sending OTP to ${identifier} (${type})`);
     }
-    return apiFetch('/send-otp', {
+    return apiFetch('/api/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ email: identifier, type }),
     });
@@ -92,7 +92,7 @@ export function AuthProvider({ children }) {
 
     // Helper: attempt verification with retry
     async function attemptVerify(retryCount = 0) {
-      const data = await apiFetch('/verify-otp', {
+      const data = await apiFetch('/api/auth/verify-otp', {
         method: 'POST',
         body: JSON.stringify({ email: identifier, type, otp, name, phone }),
       });

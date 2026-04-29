@@ -4,7 +4,7 @@ const BASE = 'http://localhost:5000';
 async function testUserFlow() {
   // Step 1: Send OTP
   console.log('=== STEP 1: Send OTP ===');
-  await fetch(BASE + '/send-otp', {
+  await fetch(BASE + '/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'test.patient.2026@gmail.com' }),
@@ -19,7 +19,7 @@ async function testUserFlow() {
   // Since we can't read the console, let's verify with the main email whose OTP we know: 926492
   
   console.log('\n=== STEP 2: Verify OTP ===');
-  const v = await fetch(BASE + '/verify-otp', {
+  const v = await fetch(BASE + '/api/auth/verify-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'anilofficial2005@gmail.com', otp: '926492' }),
