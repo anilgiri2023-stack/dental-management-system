@@ -1,53 +1,36 @@
-const nodemailer = require("nodemailer");
+const axios = require("axios");
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp-relay.brevo.com",
-  port: Number(process.env.SMTP_PORT) || 2525, // ✅ FIXED
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  },
-  connectionTimeout: 20000, // ✅ important for Render
-  greetingTimeout: 15000,
-  socketTimeout: 20000,
-});
-
-/**
- * Debug check (run once on server start)
- */
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ SMTP CONNECTION FAILED:", error);
-  } else {
-    console.log("✅ SMTP SERVER READY");
-  }
-});
-
-/**
- * Sends a general email using Nodemailer.
- */
 async function sendEmail({ to, subject, html }) {
   try {
-    const info = await transporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to,
-      subject,
-      html
-    });
+    const response = await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: { email: process.env.SMTP_USER },
+        to: [{ email: to }],
+        subject: subject,
+        htmlContent: html
+      },
+      {
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-    console.log(`✅ Email sent: ${info.messageId}`);
+    console.log("✅ Email sent via Brevo API");
     return { success: true };
 
   } catch (error) {
-    console.error("❌ Email send error FULL:", error); // ✅ full log
-    return { success: false, error: error.message };
+    console.error("❌ Brevo API error:", error.response?.data || error.message);
+
+    return {
+      success: false,
+      error: error.response?.data || error.message
+    };
   }
 }
 
-/**
- * Sends an OTP email specifically.
- */
 async function sendOTP(email, otp) {
   return await sendEmail({
     to: email,
