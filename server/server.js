@@ -296,7 +296,7 @@ const upload = multer({
 });
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /send-otp (In-memory OTP logic with Brevo SMTP)
+// 1. POST /api/auth/send-otp (In-memory OTP logic with Brevo SMTP)
 // ═══════════════════════════════════════════════════════════
 const otpStore = new Map(); // Using Map instead of object for better management
 const MANUAL_OTP_EXPIRY = 5 * 60 * 1000; // 5 minutes as requested
@@ -305,7 +305,7 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-app.post('/send-otp', async (req, res) => {
+app.post('/api/auth/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
@@ -355,47 +355,55 @@ app.post('/send-otp', async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════
-// 2. POST /verify-otp
-// ═══════════════════════════════════════════════════════════
-app.post('/verify-otp', async (req, res) => {
-  try {
-    const { email, otp, name, phone } = req.body;
-    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
+// Alias for backwards compatibility
+app.post('/send-otp', (req, res) => {
+  app.handle({ ...req, url: '/api/auth/send-otp', method: 'POST' }, res);
+});
 
-    const emailKey = email.trim().toLowerCase();
+// ═══════════════════════════════════════════════════════════
+// 2. POST /api/auth/verify-otp
+// ═══════════════════════════════════════════════════════════
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    // identifier and otp are sometimes used by frontend
+    const { email, identifier, otp, otp: otpVal, name, phone } = req.body;
+    const finalEmail = (email || identifier || '').trim().toLowerCase();
+    const finalOtp = (otp || otpVal || '').trim();
+
+    if (!finalEmail || !finalOtp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
+
     const now = Date.now();
 
     // 1. Check if record exists
-    if (!otpStore.has(emailKey)) {
+    if (!otpStore.has(finalEmail)) {
       return res.status(400).json({ success: false, message: 'No verification code found. Please request a new one.' });
     }
 
-    const record = otpStore.get(emailKey);
+    const record = otpStore.get(finalEmail);
 
     // 2. Check if expired
     if (now > record.expiresAt) {
-      otpStore.delete(emailKey);
+      otpStore.delete(finalEmail);
       return res.status(400).json({ success: false, message: 'Verification code expired. Please request a new one.' });
     }
 
     // 3. Check if match
-    if (record.otp !== otp) {
+    if (record.otp !== finalOtp) {
       return res.status(400).json({ success: false, message: 'Invalid verification code.' });
     }
 
-    console.log(`✅ OTP verified for: ${emailKey}`);
-    otpStore.delete(emailKey); // Cleanup after success
+    console.log(`✅ OTP verified for: ${finalEmail}`);
+    otpStore.delete(finalEmail); // Cleanup after success
 
     // 4. User session logic (Supabase Sync)
     // Find or create user in Supabase Auth via Admin API
     const { data: usersData } = await supabase.auth.admin.listUsers();
-    let authUser = (usersData?.users || []).find(u => u.email === emailKey);
+    let authUser = (usersData?.users || []).find(u => u.email === finalEmail);
 
     if (!authUser) {
-      console.log(`🆕 Creating new auth user for: ${emailKey}`);
+      console.log(`🆕 Creating new auth user for: ${finalEmail}`);
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
-        email: emailKey,
+        email: finalEmail,
         email_confirm: true,
         user_metadata: { name: name || 'User' }
       });
@@ -411,7 +419,7 @@ app.post('/verify-otp', async (req, res) => {
     const { data: existingUser, error: fetchErr } = await supabase
       .from('users')
       .select('*')
-      .eq('email', emailKey)
+      .eq('email', finalEmail)
       .single();
 
     let user;
@@ -432,7 +440,7 @@ app.post('/verify-otp', async (req, res) => {
         .from('users')
         .insert([{
           id: authUser.id,
-          email: email.trim().toLowerCase(),
+          email: finalEmail,
           name: name || 'User',
           phone: phone || 'N/A',
           role: 'user'
@@ -447,14 +455,14 @@ app.post('/verify-otp', async (req, res) => {
       user = newUser;
     }
 
-    // Generate session token (Requirement #2: Fix authData is not defined)
+    // Generate session token
     const token = signToken({
       id: user.id,
       email: user.email,
       role: user.role || 'user',
     });
 
-    // Sync role to Supabase Auth metadata for public.users independence (Requirement #5)
+    // Sync role to Supabase Auth metadata for public.users independence
     await supabase.auth.admin.updateUserById(authUser.id, {
       user_metadata: { role: user.role || 'user', name: user.name }
     });
@@ -471,12 +479,9 @@ app.post('/verify-otp', async (req, res) => {
   }
 });
 
-// Frontend-compatible alias
-app.post('/api/auth/verify-otp', (req, res) => {
-  const { identifier, type, otp: otpVal, name } = req.body;
-  if (identifier && !req.body.email) req.body.email = identifier;
-  if (otpVal && !req.body.otp) req.body.otp = otpVal;
-  app.handle({ ...req, url: '/verify-otp', method: 'POST' }, res);
+// Alias for backwards compatibility
+app.post('/verify-otp', (req, res) => {
+  app.handle({ ...req, url: '/api/auth/verify-otp', method: 'POST' }, res);
 });
 
 // ═══════════════════════════════════════════════════════════
