@@ -268,11 +268,13 @@ export default function DoctorDashboard() {
   const handleStatusChange = async (aptId, newStatus) => {
     const prevAppointments = [...appointments];
     const appointment = appointments.find(a => a.id === aptId);
-    const apiOrigin = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
+    const API = import.meta.env.VITE_API_URL;
+    console.log("API:", API);
+
     // Optimistic update
     setAppointments(prev => prev.map(a => a.id === aptId ? { ...a, status: newStatus } : a));
     try {
-      const res = await fetch(`${apiOrigin}/api/appointment/status`, {
+      const res = await fetch(`${API}/api/appointment/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

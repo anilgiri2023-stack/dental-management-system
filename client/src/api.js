@@ -1,6 +1,6 @@
 const API = import.meta.env.VITE_API_URL; 
 
-console.log("API URL:", API); 
+console.log("API:", API); 
 
 export async function sendOtp(email) { 
   const res = await fetch(`${API}/api/auth/send-otp`, { 

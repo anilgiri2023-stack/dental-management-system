@@ -1,11 +1,12 @@
 // Central API utility
-const configuredApiUrl = import.meta.env.VITE_API_URL;
+const API = import.meta.env.VITE_API_URL;
+console.log("API:", API);
 
 function normalizeApiUrl(url) {
   return (url || '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
 }
 
-export const API_BASE_URL = normalizeApiUrl(configuredApiUrl);
+export const API_BASE_URL = normalizeApiUrl(API);
 
 function apiUrl(endpoint) {
   // If endpoint is already a full URL, return it
@@ -19,10 +20,6 @@ function apiUrl(endpoint) {
   }
   
   return `${API_BASE_URL}${path}`;
-}
-
-if (!configuredApiUrl) {
-  console.warn('VITE_API_URL is not set. API requests will use same-origin /api.');
 }
 
 export const apiFetch = async (endpoint, options = {}) => {
