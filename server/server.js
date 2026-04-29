@@ -19,7 +19,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 dotenv.config(); // Must be called before local imports
 
-const { sendEmail } = require('./utils/emailService');
+const { sendEmail, sendOTP } = require('./utils/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -134,7 +134,7 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
 </div>
 `;
 
-  // Non-blocking call to Resend
+  // Non-blocking call to email service
   sendEmail({
     to: patientEmail,
     subject: "Your Medical Report is Ready 🧾",
@@ -162,14 +162,14 @@ const supabase = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-// Supabase is now the single source of truth for all emails.
-// Custom Nodemailer has been removed.
+// Email system is now using Nodemailer with Brevo SMTP.
+// Outdated email references have been removed.
 
 // Simple in-memory throttle to prevent hitting Supabase rate limits too hard
 const otpThrottle = new Map();
 const THROTTLE_WINDOW = 30000; // 30 seconds
 
-// Fallback OTP storage for when Supabase SMTP fails
+// Fallback OTP storage for when external email service fails
 const manualOtps = new Map();
 const MANUAL_OTP_EXPIRY = 10 * 60 * 1000; // 10 minutes
 
@@ -328,52 +328,16 @@ app.post('/send-otp', async (req, res) => {
     // 2. Manual OTP logic (Bypassing Supabase Auth OTP to avoid rate limits/SMTP issues)
     console.log('  -> Generating manual OTP...');
     
-    if (!process.env.RESEND_API_KEY) {
-      console.error('❌ RESEND_API_KEY missing. Cannot send manual OTP.');
-      return res.status(500).json({ success: false, message: 'Server configuration error: Email API key missing.' });
+    if (!process.env.SMTP_PASS) {
+      console.error('❌ SMTP configuration missing. Cannot send manual OTP.');
+      return res.status(500).json({ success: false, message: 'Server configuration error: SMTP credentials missing.' });
     }
 
     try {
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
 
-      const emailResult = await sendEmail({
-        to: emailKey,
-        subject: "Your Verification Code - Clinical Serenity",
-        html: `
-<div style="font-family: 'Segoe UI', sans-serif; background:#f4f7fb; padding:30px;">
-  <div style="max-width:500px;margin:auto;background:white;border-radius:12px;padding:30px;box-shadow:0 6px 25px rgba(0,0,0,0.1);text-align:center;">
-    
-    <h2 style="color:#2e7d6b;margin-bottom:10px;">
-      Clinical Serenity
-    </h2>
-
-    <p style="font-size:16px;color:#333;">
-      Welcome! Please use the verification code below:
-    </p>
-
-    <div style="margin:25px 0;">
-      <span style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#2e7d6b;">
-        ${code}
-      </span>
-    </div>
-
-    <p style="color:#666;font-size:14px;">
-      This code will expire in <b>10 minutes</b>.
-    </p>
-
-    <p style="color:#999;font-size:12px;margin-top:20px;">
-      If you didn’t request this, you can safely ignore this email.
-    </p>
-
-    <hr style="margin:25px 0;border:none;border-top:1px solid #eee;" />
-
-    <p style="font-size:12px;color:#aaa;">
-      © Clinical Serenity
-    </p>
-  </div>
-</div>
-`});
+      const emailResult = await sendOTP(emailKey, code);
 
       if (emailResult.success) {
         console.log(`✅ Verification email sent to ${emailKey}`);
@@ -383,7 +347,7 @@ app.post('/send-otp', async (req, res) => {
           message: `Verification code sent to ${emailKey}`
         });
       } else {
-        console.error(`❌ Email delivery failed for ${emailKey}`);
+        console.error(`❌ Email delivery failed for ${emailKey}:`, emailResult.error);
         return res.status(500).json({
           success: false,
           message: 'Email delivery failed. Please try again later.'
@@ -1149,7 +1113,7 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
 </div>
 `;
 
-    // Replace the transporter.sendMail call with sendEmail from Resend
+    // Replace the transporter.sendMail call with sendEmail service
     sendEmail({
       to: recipientEmail,
       subject,
@@ -1350,7 +1314,7 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
 
     console.log('📧 Sending custom doctor invitation to:', email);
 
-    // 2. Send Invitation Email using Resend
+    // 2. Send Invitation Email using email service
     sendEmail({
       to: email.trim().toLowerCase(),
       subject: "You're invited as a Doctor - Clinical Serenity",
@@ -1564,7 +1528,7 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
   </div>
 </div>`;
 
-    // Non-blocking email sending via Resend service
+    // Non-blocking email sending via email service
     sendEmail({
       to: adminEmail,
       subject: "You're invited as Admin - Clinical Serenity",
@@ -1752,7 +1716,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Database error: ' + updateErr.message });
     }
 
-    // 4. Send custom email using Resend
+    // 4. Send custom email using email service
     const resetUrl = `https://dental-management-system-sand.vercel.app/reset-password?token=${resetToken}`;
     const emailResult = await sendEmail({
       to: trimmedEmail,
@@ -2353,13 +2317,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT });
 });
 
-// GET /api/test-email — verify Resend delivery
+// GET /api/test-email — verify SMTP delivery
 app.get('/api/test-email', async (req, res) => {
   try {
     await sendEmail({
       to: process.env.ADMIN_EMAIL,
       subject: "Test Email - Clinical Serenity",
-      html: "<h2>Resend is working ✅</h2>",
+      html: "<h2>SMTP is working ✅</h2>",
     });
 
     return res.json({ success: true });
