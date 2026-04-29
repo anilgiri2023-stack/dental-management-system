@@ -2,11 +2,25 @@ const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp-relay.brevo.com",
-  port: process.env.SMTP_PORT || 587,
+  port: Number(process.env.SMTP_PORT) || 2525, // ✅ FIXED
   secure: false,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
+  },
+  connectionTimeout: 20000, // ✅ important for Render
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
+});
+
+/**
+ * Debug check (run once on server start)
+ */
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ SMTP CONNECTION FAILED:", error);
+  } else {
+    console.log("✅ SMTP SERVER READY");
   }
 });
 
@@ -21,10 +35,12 @@ async function sendEmail({ to, subject, html }) {
       subject,
       html
     });
+
     console.log(`✅ Email sent: ${info.messageId}`);
     return { success: true };
+
   } catch (error) {
-    console.error("❌ Email send error:", error);
+    console.error("❌ Email send error FULL:", error); // ✅ full log
     return { success: false, error: error.message };
   }
 }

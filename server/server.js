@@ -307,57 +307,62 @@ function generateOTP() {
 
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+    console.log("🔥 SEND OTP ROUTE HIT");
 
-    console.log(`📨 Triggering OTP process for: ${email}`);
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
 
     const emailKey = email.trim().toLowerCase();
     const now = Date.now();
 
-    // 1. Rate limiting (30s throttle)
-    if (otpThrottle.has(emailKey)) {
-      const lastSent = otpThrottle.get(emailKey);
-      if (now - lastSent < THROTTLE_WINDOW) {
-        const waitTime = Math.ceil((THROTTLE_WINDOW - (now - lastSent)) / 1000);
-        return res.status(429).json({
-          success: false,
-          message: `Please wait ${waitTime} seconds before requesting another code.`,
-        });
-      }
-    }
+    console.log(`📨 OTP request for: ${emailKey}`);
 
-    // 2. SMTP config check
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ SMTP credentials missing in environment variables.');
-      return res.status(500).json({ success: false, message: 'Server configuration error: Email credentials missing.' });
+      console.error("❌ SMTP ENV MISSING");
+      return res.status(500).json({
+        success: false,
+        message: 'SMTP config missing'
+      });
     }
 
-    // 3. Generate and Store OTP
-    const otp = generateOTP();
-    otpStore.set(emailKey, { otp, expiresAt: now + MANUAL_OTP_EXPIRY });
-    console.log(`  -> Generated OTP for ${emailKey}: ${otp} (Expires in 5m)`);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 4. Send Email
-    const emailResult = await sendOTP(emailKey, otp);
+    otpStore.set(emailKey, {
+      otp,
+      expiresAt: now + 5 * 60 * 1000
+    });
 
-    if (emailResult.success) {
-      console.log(`✅ OTP email sent to ${emailKey}`);
-      otpThrottle.set(emailKey, now);
-      return res.json({ success: true, message: `Verification code sent to ${emailKey}` });
-    } else {
-      console.error(`❌ Email delivery failed for ${emailKey}:`, emailResult.error);
-      return res.status(500).json({ success: false, message: 'Email delivery failed. Please try again later.' });
+    console.log(`🔐 OTP: ${otp}`);
+
+    const result = await sendOTP(emailKey, otp);
+
+    if (!result.success) {
+      console.error("❌ EMAIL FAILED:", result.error);
+      return res.status(500).json({
+        success: false,
+        message: 'Email send failed'
+      });
     }
-  } catch (error) {
-    console.error('🔥 CRITICAL ERROR in /send-otp:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+
+    console.log("✅ OTP SENT SUCCESS");
+
+    return res.json({
+      success: true,
+      message: 'OTP sent successfully'
+    });
+
+  } catch (err) {
+    console.error("🔥 SEND OTP ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
   }
-});
-
-// Alias for backwards compatibility
-app.post('/send-otp', (req, res) => {
-  app.handle({ ...req, url: '/api/auth/send-otp', method: 'POST' }, res);
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -477,11 +482,6 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     console.error('Verify OTP error:', error);
     res.status(500).json({ success: false, message: 'Verification failed' });
   }
-});
-
-// Alias for backwards compatibility
-app.post('/verify-otp', (req, res) => {
-  app.handle({ ...req, url: '/api/auth/verify-otp', method: 'POST' }, res);
 });
 
 // ═══════════════════════════════════════════════════════════
