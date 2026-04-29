@@ -169,10 +169,6 @@ const supabase = createClient(
 const otpThrottle = new Map();
 const THROTTLE_WINDOW = 30000; // 30 seconds
 
-// Fallback OTP storage for when external email service fails
-const manualOtps = new Map();
-const MANUAL_OTP_EXPIRY = 10 * 60 * 1000; // 10 minutes
-
 // ─── JWT ─────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
 
@@ -300,8 +296,15 @@ const upload = multer({
 });
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /send-otp (Migrated to Supabase)
+// 1. POST /send-otp (In-memory OTP logic with Brevo SMTP)
 // ═══════════════════════════════════════════════════════════
+const otpStore = new Map(); // Using Map instead of object for better management
+const MANUAL_OTP_EXPIRY = 5 * 60 * 1000; // 5 minutes as requested
+
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 app.post('/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
@@ -312,7 +315,7 @@ app.post('/send-otp', async (req, res) => {
     const emailKey = email.trim().toLowerCase();
     const now = Date.now();
 
-    // 1. Check local throttle
+    // 1. Rate limiting (30s throttle)
     if (otpThrottle.has(emailKey)) {
       const lastSent = otpThrottle.get(emailKey);
       if (now - lastSent < THROTTLE_WINDOW) {
@@ -320,110 +323,76 @@ app.post('/send-otp', async (req, res) => {
         return res.status(429).json({
           success: false,
           message: `Please wait ${waitTime} seconds before requesting another code.`,
-          error_code: 'rate_limit_exceeded'
         });
       }
     }
 
-    // 2. Manual OTP logic (Bypassing Supabase Auth OTP to avoid rate limits/SMTP issues)
-    console.log('  -> Generating manual OTP...');
-    
-    if (!process.env.SMTP_PASS) {
-      console.error('❌ SMTP configuration missing. Cannot send manual OTP.');
-      return res.status(500).json({ success: false, message: 'Server configuration error: SMTP credentials missing.' });
+    // 2. SMTP config check
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('❌ SMTP credentials missing in environment variables.');
+      return res.status(500).json({ success: false, message: 'Server configuration error: Email credentials missing.' });
     }
 
-    try {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      manualOtps.set(emailKey, { code, expires: now + MANUAL_OTP_EXPIRY });
+    // 3. Generate and Store OTP
+    const otp = generateOTP();
+    otpStore.set(emailKey, { otp, expiresAt: now + MANUAL_OTP_EXPIRY });
+    console.log(`  -> Generated OTP for ${emailKey}: ${otp} (Expires in 5m)`);
 
-      const emailResult = await sendOTP(emailKey, code);
+    // 4. Send Email
+    const emailResult = await sendOTP(emailKey, otp);
 
-      if (emailResult.success) {
-        console.log(`✅ Verification email sent to ${emailKey}`);
-        otpThrottle.set(emailKey, now);
-        return res.json({
-          success: true,
-          message: `Verification code sent to ${emailKey}`
-        });
-      } else {
-        console.error(`❌ Email delivery failed for ${emailKey}:`, emailResult.error);
-        return res.status(500).json({
-          success: false,
-          message: 'Email delivery failed. Please try again later.'
-        });
-      }
-    } catch (err) {
-      console.error(`❌ OTP generation error:`, err.message);
-      return res.status(500).json({ success: false, message: 'Internal server error: ' + err.message });
+    if (emailResult.success) {
+      console.log(`✅ OTP email sent to ${emailKey}`);
+      otpThrottle.set(emailKey, now);
+      return res.json({ success: true, message: `Verification code sent to ${emailKey}` });
+    } else {
+      console.error(`❌ Email delivery failed for ${emailKey}:`, emailResult.error);
+      return res.status(500).json({ success: false, message: 'Email delivery failed. Please try again later.' });
     }
-
-    // 5. If no fallback configured and Supabase failed
-    return res.status(supabaseError.status || 400).json({
-      success: false,
-      message: `Failed to send verification code: ${supabaseError.message}`
-    });
-
   } catch (error) {
     console.error('🔥 CRITICAL ERROR in /send-otp:', error);
-    res.status(500).json({
-      success: false,
-      message: `Server Error: ${error.message || 'Internal failure'}`,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
-// Also mount on /api/auth/send-otp for frontend compatibility
-app.post('/api/auth/send-otp', (req, res) => {
-  // Map type-based request to email-based
-  const { identifier, type } = req.body;
-  if (type === 'email' && identifier) req.body.email = identifier;
-  else if (!req.body.email && identifier) req.body.email = identifier;
-  // Forward to the main handler
-  app.handle({ ...req, url: '/send-otp', method: 'POST' }, res);
-});
-
 // ═══════════════════════════════════════════════════════════
-// 2. POST /verify-otp (Migrated to Supabase)
+// 2. POST /verify-otp
 // ═══════════════════════════════════════════════════════════
 app.post('/verify-otp', async (req, res) => {
   try {
     const { email, otp, name, phone } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
-    console.log(`🔑 Verifying Manual OTP for: ${email}`);
     const emailKey = email.trim().toLowerCase();
+    const now = Date.now();
 
-    // 1. Verify against Manual Fallback Store
-    let authUser = null;
-    
-    if (!manualOtps.has(emailKey)) {
-      console.log(`❌ No OTP found for: ${emailKey}`);
+    // 1. Check if record exists
+    if (!otpStore.has(emailKey)) {
       return res.status(400).json({ success: false, message: 'No verification code found. Please request a new one.' });
     }
 
-    const record = manualOtps.get(emailKey);
-    const now = Date.now();
+    const record = otpStore.get(emailKey);
 
-    if (now > record.expires) {
-      console.log(`❌ OTP expired for: ${emailKey}`);
-      manualOtps.delete(emailKey);
+    // 2. Check if expired
+    if (now > record.expiresAt) {
+      otpStore.delete(emailKey);
       return res.status(400).json({ success: false, message: 'Verification code expired. Please request a new one.' });
     }
 
-    if (record.code !== otp) {
-      console.log(`❌ OTP mismatch for: ${emailKey}. Expected ${record.code}, got ${otp}`);
+    // 3. Check if match
+    if (record.otp !== otp) {
       return res.status(400).json({ success: false, message: 'Invalid verification code.' });
     }
 
-    console.log(`✅ Manual OTP match for: ${emailKey}`);
+    console.log(`✅ OTP verified for: ${emailKey}`);
+    otpStore.delete(emailKey); // Cleanup after success
 
-    // 2. Find or create user in Supabase Auth via Admin API (Requirement #6: Bypass Auth OTP)
-    const { data: usersData, error: listErr } = await supabase.auth.admin.listUsers();
-    let targetAuthUser = (usersData?.users || []).find(u => u.email === emailKey);
+    // 4. User session logic (Supabase Sync)
+    // Find or create user in Supabase Auth via Admin API
+    const { data: usersData } = await supabase.auth.admin.listUsers();
+    let authUser = (usersData?.users || []).find(u => u.email === emailKey);
 
-    if (!targetAuthUser) {
+    if (!authUser) {
       console.log(`🆕 Creating new auth user for: ${emailKey}`);
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
         email: emailKey,
@@ -431,11 +400,8 @@ app.post('/verify-otp', async (req, res) => {
         user_metadata: { name: name || 'User' }
       });
       if (createErr) throw createErr;
-      targetAuthUser = newUser.user;
+      authUser = newUser.user;
     }
-
-    authUser = targetAuthUser;
-    manualOtps.delete(emailKey); // Cleanup
 
     if (!authUser) {
       return res.status(401).json({ success: false, message: 'Authentication failed. Please try again.' });
