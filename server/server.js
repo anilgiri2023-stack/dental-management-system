@@ -13,26 +13,24 @@ const multer = require('multer');
 const cron = require('node-cron');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
 
 dotenv.config(); // Must be called before local imports
 
-const { sendEmail } = require('./services/emailService');
+const { sendEmail, transporter } = require('./services/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
+// Add transporter.verify() at server start
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("SMTP connection failed:", error);
+  } else {
+    console.log("SMTP server is ready");
+  }
 });
 
 // ─── Middleware ───────────────────────────────────────────
@@ -98,10 +96,6 @@ function logSmtpConfig(context = 'SMTP') {
   console.log(`${context} SMTP_USER:`, process.env.SMTP_USER || 'MISSING');
 }
 
-function getMailFrom() {
-  return process.env.SMTP_FROM || process.env.SMTP_USER;
-}
-
 async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
   if (!patientEmail) {
     console.log('📧 Report email skipped: patient email missing');
@@ -155,12 +149,17 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
 </div>
 `;
 
-  await transporter.sendMail({
-    from: getMailFrom(),
-    to: patientEmail,
-    subject: "Your Medical Report is Ready 🧾",
-    html: reportHtmlTemplate,
-  });
+  try {
+    const info = await transporter.sendMail({
+      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+      to: patientEmail,
+      subject: "Your Medical Report is Ready 🧾",
+      html: reportHtmlTemplate,
+    });
+    console.log("✅ Report email sent successfully:", info.response);
+  } catch (error) {
+    console.error("❌ Failed to send report email:", error);
+  }
 }
 
 console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
@@ -1167,12 +1166,13 @@ app.put('/api/appointment/status', authMiddleware, async (req, res) => {
 </div>
 `;
 
-    await transporter.sendMail({
-      from: getMailFrom(),
+    const info = await transporter.sendMail({
+      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
       to: recipientEmail,
       subject,
       html: htmlTemplate,
     });
+    console.log("✅ Appointment status email sent successfully:", info.response);
 
     res.json({ success: true });
   } catch (error) {
@@ -1581,17 +1581,21 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
   </div>
 </div>`;
 
-    // Non-blocking email sending
-    transporter.sendMail({
-      from: getMailFrom(),
-      to: adminEmail,
-      subject: 'Admin Invitation - Clinical Serenity',
-      html: inviteHtml,
-    }).then(info => {
-      console.log('INVITE_ADMIN email sent successfully:', info.messageId);
-    }).catch(mailErr => {
-      console.error('INVITE_ADMIN email failed (non-blocking):', mailErr);
-    });
+    // Non-blocking email sending with detailed logging
+    (async () => {
+      try {
+        console.log("Sending email to:", adminEmail);
+        const info = await transporter.sendMail({
+          from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
+          to: adminEmail,
+          subject: 'Admin Invitation - Clinical Serenity',
+          html: inviteHtml,
+        });
+        console.log("✅ Admin invitation email sent successfully:", info.response);
+      } catch (err) {
+        console.error("Email error:", err);
+      }
+    })();
 
     return res.json({ success: true, message: "Admin invited successfully" });
 
@@ -2411,7 +2415,7 @@ app.get('/api/test-email', async (req, res) => {
 </div>`;
 
     const info = await transporter.sendMail({
-      from: getMailFrom(),
+      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
       to,
       subject: 'Clinical Serenity SMTP Test',
       html,

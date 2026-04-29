@@ -1,8 +1,22 @@
 require('dotenv').config();
 const nodemailer = require('nodemailer');
 
+// Create transporter ONCE (Singleton) to be reused
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // IMPORTANT for port 465
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+});
+
 /**
- * Sends an email using Nodemailer with Brevo SMTP.
+ * Sends an email using Nodemailer with Gmail SMTP.
  * 
  * @param {string} to - Recipient email address
  * @param {string} subject - Email subject
@@ -14,39 +28,24 @@ const sendEmail = async (to, subject, message) => {
     console.log("=== EMAIL SENDING START ===");
     
     // 1. Validate environment variables
-    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
+    const { SMTP_USER, SMTP_PASS } = process.env;
     
-    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !SMTP_FROM) {
-      console.error("❌ MISSING SMTP CONFIGURATION:");
+    if (!SMTP_USER || !SMTP_PASS) {
+      console.error("❌ MISSING SMTP CREDENTIALS:");
       console.table({
-        SMTP_HOST: SMTP_HOST || "MISSING",
-        SMTP_PORT: SMTP_PORT || "MISSING",
         SMTP_USER: SMTP_USER || "MISSING",
         SMTP_PASS: SMTP_PASS ? "PRESENT" : "MISSING",
-        SMTP_FROM: SMTP_FROM || "MISSING"
       });
       return false;
     }
 
     // 2. Debug logs for credentials
     console.log("DEBUG - SMTP_USER:", SMTP_USER);
-    console.log("DEBUG - SMTP_PASS:", SMTP_PASS ? "EXISTS (HIDDEN)" : "MISSING");
     console.log(`DEBUG - Target: ${to} | Subject: ${subject}`);
 
-    // 3. Create transporter INSIDE function (Brevo Config)
-    const transporter = nodemailer.createTransport({
-      host: SMTP_HOST, // Expected: smtp-relay.brevo.com
-      port: parseInt(SMTP_PORT), // Expected: 587
-      secure: false, // true for 465, false for 587
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS,
-      },
-    });
-
-    // 4. Send the email
+    // 3. Send the email
     const info = await transporter.sendMail({
-      from: `"Clinical Serenity" <${SMTP_FROM}>`,
+      from: `"Clinical Serenity" <${process.env.SMTP_USER}>`,
       to,
       subject,
       html: message,
@@ -66,9 +65,6 @@ const sendEmail = async (to, subject, message) => {
     if (error.response) {
       console.error("SMTP Response:", error.response);
     }
-    if (error.responseCode) {
-      console.error("SMTP Response Code:", error.responseCode);
-    }
     
     console.error("Full Error Object:", error);
     console.log("=== EMAIL SENDING FAILED ===");
@@ -79,4 +75,5 @@ const sendEmail = async (to, subject, message) => {
 
 module.exports = {
   sendEmail,
+  transporter,
 };
