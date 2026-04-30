@@ -19,9 +19,11 @@ dns.setDefaultResultOrder("ipv4first");
 
 dotenv.config(); // Must be called before local imports
 
-const { sendEmail, sendOTP } = require('./utils/emailService');
+const { sendEmail, sendOTPEmail } = require('./utils/emailService');
 const authRoutes = require('./routes/authRoutes');
 const protect = require('./middleware/authMiddleware');
+const { supabase } = require('./utils/supabase');
+const { escapeHtml, formatAppointmentDate, isUuid } = require('./utils/helpers');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,58 +35,16 @@ app.use(express.json());
 // ─── Auth Routes ──────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 
-// ─── Supabase (Service Role — bypasses RLS) ──────────────
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SERVICE_ROLE_KEY =
-  process.env.SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_KEY;
-const SERVICE_ROLE_KEY_SOURCE = process.env.SERVICE_ROLE_KEY
-  ? 'SERVICE_ROLE_KEY'
-  : process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? 'SUPABASE_SERVICE_ROLE_KEY'
-    : process.env.SUPABASE_SERVICE_KEY
-      ? 'SUPABASE_SERVICE_KEY'
-      : null;
-
-function getSupabaseProjectRef(url) {
-  try {
-    return new URL(url).hostname.split('.')[0];
-  } catch {
-    return 'invalid-url';
+// Helper for UUID validation
+const validateUuid = (req, res, next) => {
+  const { id, user_id, doctor_id, appointmentId } = { ...req.params, ...req.body };
+  const targetId = id || user_id || doctor_id || appointmentId;
+  
+  if (targetId && !isUuid(targetId)) {
+    return res.status(400).json({ success: false, message: 'Invalid ID format (UUID expected)' });
   }
-}
-
-function getJwtRole(token) {
-  try {
-    const payload = token.split('.')[1];
-    const decoded = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    return JSON.parse(decoded).role || 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
-function escapeHtml(value = '') {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatAppointmentDate(dateValue) {
-  if (!dateValue) return '';
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return String(dateValue);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+  next();
+};
 
 async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
   if (!patientEmail) {
@@ -139,7 +99,6 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
 </div>
 `;
 
-  // Non-blocking call to email service
   sendEmail({
     to: patientEmail,
     subject: "Your Medical Report is Ready 🧾",
@@ -148,27 +107,6 @@ async function sendReportReadyEmail({ patientEmail, patientName, doctorName }) {
     console.error("❌ Failed to send report email:", err);
   });
 }
-
-console.log('SUPABASE_URL:', SUPABASE_URL || 'MISSING');
-console.log("ENV:", process.env.SUPABASE_URL);
-console.log('SUPABASE_PROJECT_REF:', SUPABASE_URL ? getSupabaseProjectRef(SUPABASE_URL) : 'MISSING');
-console.log('SUPABASE_KEY_SOURCE:', SERVICE_ROLE_KEY_SOURCE || 'MISSING');
-console.log('SUPABASE_KEY_ROLE:', SERVICE_ROLE_KEY ? getJwtRole(SERVICE_ROLE_KEY) : 'MISSING');
-
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error('Missing Supabase env vars. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SERVICE_ROLE_KEY) in Vercel.');
-} else if (getJwtRole(SERVICE_ROLE_KEY) !== 'service_role') {
-  console.error('Supabase backend key is not service_role. Replace it with the Supabase service role key in Vercel.');
-}
-
-const supabase = createClient(
-  SUPABASE_URL,
-  SERVICE_ROLE_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
-
-// Email system is now using Nodemailer with Brevo SMTP.
-// Outdated email references have been removed.
 
 // Simple in-memory throttle to prevent hitting Supabase rate limits too hard
 const otpThrottle = new Map();
@@ -411,7 +349,20 @@ async function handleAdminLogin(req, res) {
     }
 
     const admin = data[0];
+
+    // Check if admin exists in public.users to check is_verified
+    const { data: publicUser } = await supabase
+      .from('users')
+      .select('is_verified')
+      .eq('id', admin.id)
+      .single();
+
+    if (publicUser && publicUser.is_verified === false) {
+      return res.status(403).json({ success: false, message: 'Admin account not verified.' });
+    }
+
     const storedPassword = admin.password || admin.password_hash || admin.passwordHash;
+
     const isMatch = await validatePassword(password, storedPassword);
 
     if (!isMatch) {
@@ -459,6 +410,11 @@ async function handleLogin(req, res, targetRole) {
 
     if (user.role !== targetRole && targetRole !== 'any') {
       return res.status(403).json({ success: false, message: `Access denied: This account is not a ${targetRole}.` });
+    }
+
+    // Check if user is verified (Requirement #5)
+    if (user.is_verified === false) {
+      return res.status(403).json({ success: false, message: 'Account not verified. Please verify your email.' });
     }
 
     // 2. Validate Password Existence (Requirement #5 & #6)
@@ -616,15 +572,19 @@ async function bookAppointment(req, res) {
   }
 }
 
-app.post('/book-appointment', authMiddleware, bookAppointment);
-app.post('/api/appointments', authMiddleware, bookAppointment);
-app.post('/api/book-appointment', authMiddleware, bookAppointment);
+app.post('/book-appointment', authMiddleware, validateUuid, bookAppointment);
+app.post('/api/appointments', authMiddleware, validateUuid, bookAppointment);
+app.post('/api/book-appointment', authMiddleware, validateUuid, bookAppointment);
 
 // ═══════════════════════════════════════════════════════════
 // 4. GET /my-appointments — logged-in user's appointments only
 // ═══════════════════════════════════════════════════════════
 async function getMyAppointments(req, res) {
   try {
+    if (!req.user || !req.user.id || !isUuid(req.user.id)) {
+      return res.status(401).json({ success: false, message: 'Invalid or missing user ID' });
+    }
+
     let query = supabase.from('appointments').select('*');
 
     if (req.user.role === 'admin') {
@@ -640,37 +600,43 @@ async function getMyAppointments(req, res) {
     query = query.order('date', { ascending: false });
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      console.error('Fetch appointments DB error:', error);
+      return res.status(500).json({ success: false, message: 'Database error fetching appointments' });
+    }
 
     // Enrich appointments with user details for admin and doctor view
     let enriched = data || [];
     if ((req.user.role === 'admin' || req.user.role === 'doctor') && enriched.length > 0) {
-      // Get unique user IDs
-      const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
-      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
+      // Get unique user IDs and validate them as UUIDs
+      const userIds = [...new Set(enriched.map(a => a.user_id).filter(id => id && isUuid(id)))];
+      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(id => id && isUuid(id)))];
       const allIds = [...new Set([...userIds, ...doctorIds])];
 
-      const { data: usersData } = await supabase
-        .from('users')
-        .select('id, email, name, phone')
-        .in('id', allIds);
+      if (allIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users')
+          .select('id, email, name, phone')
+          .in('id', allIds);
 
-      const userMap = {};
-      (usersData || []).forEach(u => { userMap[u.id] = u; });
+        if (usersError) console.error('Enrichment error:', usersError.message);
 
-      enriched = enriched.map(apt => {
-        const dbUser = userMap[apt.user_id] || {};
-        const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
-        return {
-          ...apt,
-          // Prioritize data in appointments table (set during booking), fallback to users table
-          name: apt.name || dbUser.name || 'Patient',
-          email: apt.email || dbUser.email || '',
-          phone: apt.phone || dbUser.phone || '',
-          doctor_name: doctorUser ? doctorUser.name : 'N/A',
-          doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
-        };
-      });
+        const userMap = {};
+        (usersData || []).forEach(u => { userMap[u.id] = u; });
+
+        enriched = enriched.map(apt => {
+          const dbUser = userMap[apt.user_id] || {};
+          const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
+          return {
+            ...apt,
+            name: apt.name || dbUser.name || 'Patient',
+            email: apt.email || dbUser.email || '',
+            phone: apt.phone || dbUser.phone || '',
+            doctor_name: doctorUser ? doctorUser.name : 'N/A',
+            doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
+          };
+        });
+      }
     }
 
     res.json({ success: true, appointments: enriched });
@@ -699,26 +665,28 @@ app.get('/all-appointments', authMiddleware, adminOnly, async (req, res) => {
     // Enrich with user info
     let enriched = data || [];
     if (enriched.length > 0) {
-      const userIds = [...new Set(enriched.map(a => a.user_id).filter(Boolean))];
-      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(Boolean))];
+      const userIds = [...new Set(enriched.map(a => a.user_id).filter(id => id && isUuid(id)))];
+      const doctorIds = [...new Set(enriched.map(a => a.doctor_id).filter(id => id && isUuid(id)))];
       const allIdsToFetch = [...new Set([...userIds, ...doctorIds])];
 
-      const { data: usersData } = await supabase.from('users').select('id, email, name, phone, role').in('id', allIdsToFetch);
-      const userMap = {};
-      (usersData || []).forEach(u => { userMap[u.id] = u; });
+      if (allIdsToFetch.length > 0) {
+        const { data: usersData } = await supabase.from('users').select('id, email, name, phone, role').in('id', allIdsToFetch);
+        const userMap = {};
+        (usersData || []).forEach(u => { userMap[u.id] = u; });
 
-      enriched = enriched.map(apt => {
-        const dbUser = userMap[apt.user_id] || {};
-        const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
-        return {
-          ...apt,
-          name: apt.name || dbUser.name || 'Patient',
-          email: apt.email || dbUser.email || '',
-          phone: apt.phone || dbUser.phone || '',
-          doctor_name: doctorUser ? doctorUser.name : 'N/A',
-          doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
-        };
-      });
+        enriched = enriched.map(apt => {
+          const dbUser = userMap[apt.user_id] || {};
+          const doctorUser = apt.doctor_id ? userMap[apt.doctor_id] : null;
+          return {
+            ...apt,
+            name: apt.name || dbUser.name || 'Patient',
+            email: apt.email || dbUser.email || '',
+            phone: apt.phone || dbUser.phone || '',
+            doctor_name: doctorUser ? doctorUser.name : 'N/A',
+            doctorId: doctorUser ? { _id: doctorUser.id, name: doctorUser.name, email: doctorUser.email } : null
+          };
+        });
+      }
     }
 
     res.json({ success: true, appointments: enriched });
@@ -771,28 +739,29 @@ async function updateStatus(req, res) {
   }
 }
 
-app.put('/update-status', authMiddleware, adminOnly, updateStatus);
-app.patch('/api/appointments/:id/status', authMiddleware, adminOnly, updateStatus);
-app.put('/api/update-status', authMiddleware, adminOnly, updateStatus);
+app.put('/update-status', authMiddleware, adminOnly, validateUuid, updateStatus);
+app.patch('/api/appointments/:id/status', authMiddleware, adminOnly, validateUuid, updateStatus);
+app.put('/api/update-status', authMiddleware, adminOnly, validateUuid, updateStatus);
 
 // PUT /api/appointment/status — doctor/admin updates status and notifies patient
-app.put('/api/appointment/status', authMiddleware, async (req, res) => {
+app.put('/api/appointment/status', authMiddleware, validateUuid, async (req, res) => {
   try {
     if (!['doctor', 'admin'].includes(req.user?.role)) {
       return res.status(403).json({ success: false, message: 'Doctor or admin only' });
     }
 
     const { appointmentId, status: requestedStatus, patientEmail } = req.body;
+    
+    if (!appointmentId || !isUuid(appointmentId)) {
+      return res.status(400).json({ success: false, message: 'Valid appointmentId (UUID) is required' });
+    }
+
     const normalizedStatus = String(requestedStatus || '').trim().toLowerCase();
     const statusMap = {
       approved: 'Approved',
       rejected: 'Rejected',
     };
     const dbStatus = statusMap[normalizedStatus];
-
-    if (!appointmentId) {
-      return res.status(400).json({ success: false, message: 'appointmentId is required' });
-    }
 
     if (!dbStatus) {
       return res.status(400).json({ success: false, message: 'status must be approved or rejected' });
@@ -979,15 +948,16 @@ function handleAvatarUpload(req, res, next) {
 }
 
 // POST /api/avatar/upload — upload profile picture
-app.post('/api/avatar/upload', authMiddleware, handleAvatarUpload, async (req, res) => {
+app.post('/api/avatar/upload', authMiddleware, validateUuid, handleAvatarUpload, async (req, res) => {
   try {
-    console.log("ENV:", process.env.SUPABASE_URL);
-    console.log("Request file:", req.file);
-
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, message: 'No image file provided' });
 
     const userId = req.user.id;
+    if (!userId || !isUuid(userId)) {
+      return res.status(401).json({ success: false, message: 'Valid UUID user ID required' });
+    }
+
     const fileExt = (file.originalname.split('.').pop() || 'jpg').toLowerCase();
     const fileName = `${userId}/${Date.now()}.${fileExt}`;
 
@@ -1036,10 +1006,18 @@ app.post('/api/avatar/upload', authMiddleware, handleAvatarUpload, async (req, r
 });
 
 // GET /api/avatar — get current user's avatar
-app.get('/api/avatar', authMiddleware, async (req, res) => {
+app.get('/api/avatar', authMiddleware, validateUuid, async (req, res) => {
   try {
-    const { data } = await supabase
+    if (!req.user?.id || !isUuid(req.user.id)) {
+      return res.status(401).json({ success: false, message: 'Valid UUID user ID required' });
+    }
+    const { data, error } = await supabase
       .from('users').select('avatar_url').eq('id', req.user.id).single();
+    
+    if (error) {
+      console.error('Fetch avatar DB error:', error.message);
+      return res.json({ success: true, avatar_url: null });
+    }
     res.json({ success: true, avatar_url: data?.avatar_url || null });
   } catch (err) {
     res.json({ success: true, avatar_url: null });
@@ -1049,10 +1027,17 @@ app.get('/api/avatar', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // DELETE /api/appointments/:id — admin only
 // ═══════════════════════════════════════════════════════════
-app.delete('/api/appointments/:id', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/appointments/:id', authMiddleware, adminOnly, validateUuid, async (req, res) => {
   try {
-    const { error } = await supabase.from('appointments').delete().eq('id', req.params.id);
-    if (error) throw error;
+    const { id } = req.params;
+    if (!id || !isUuid(id)) {
+      return res.status(400).json({ success: false, message: 'Valid appointment ID (UUID) is required' });
+    }
+    const { error } = await supabase.from('appointments').delete().eq('id', id);
+    if (error) {
+      console.error('Delete appointment DB error:', error.message);
+      return res.status(500).json({ success: false, message: 'Delete failed in database' });
+    }
     res.json({ success: true, message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Delete failed' });
@@ -1065,7 +1050,7 @@ app.delete('/api/appointments/:id', authMiddleware, adminOnly, async (req, res) 
 app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { role } = req.query;
-    let query = supabase.from('users').select('*').order('id', { ascending: false });
+    let query = supabase.from('users').select('*').order('created_at', { ascending: false });
 
     if (role) {
       query = query.eq('role', role);
@@ -1095,15 +1080,37 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
       return res.status(400).json({ success: false, message: 'Email and name are required' });
     }
 
-    // 1. Generate Custom Invite Link
+    const finalEmail = email.trim().toLowerCase();
+
+    // 1. Create in Supabase Auth first to get a valid UUID
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: finalEmail,
+      email_confirm: true,
+      user_metadata: { name, role: 'doctor' }
+    });
+
+    // If user already exists in Auth, try to find them
+    let authUser = authData?.user;
+    if (authError) {
+      if (authError.message.includes('already been registered')) {
+        const { data: listData } = await supabase.auth.admin.listUsers();
+        authUser = (listData?.users || []).find(u => u.email === finalEmail);
+      } else {
+        throw authError;
+      }
+    }
+
+    if (!authUser) throw new Error('Could not create or find auth user');
+
+    // 2. Generate Custom Invite Link
     const frontendUrl = process.env.FRONTEND_URL || 'https://dental-management-system-sand.vercel.app';
-    const inviteLink = `${frontendUrl}/doctor-register?email=${email.trim().toLowerCase()}`;
+    const inviteLink = `${frontendUrl}/doctor-register?email=${finalEmail}`;
 
-    console.log('📧 Sending custom doctor invitation to:', email);
+    console.log('📧 Sending custom doctor invitation to:', finalEmail);
 
-    // 2. Send Invitation Email using email service
+    // 3. Send Invitation Email using email service
     sendEmail({
-      to: email.trim().toLowerCase(),
+      to: finalEmail,
       subject: "You're invited as a Doctor - Clinical Serenity",
       html: `
 <div style="font-family: Arial, sans-serif; padding:30px; background:#f4f7fb;">
@@ -1135,15 +1142,16 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
       console.error('❌ Failed to send doctor invite email:', err);
     });
 
-    // 3. Upsert into public.users table (allows re-inviting or updating existing user)
-    // We use email as conflict target since we don't have a Supabase Auth ID yet
+    // 4. Upsert into public.users table using the UUID from Auth
     const { error: upsertError } = await supabase
       .from('users')
       .upsert({
-        email: email.trim().toLowerCase(),
+        id: authUser.id,
+        email: finalEmail,
         name: name.trim(),
         role: 'doctor',
         status: 'invited',
+        is_verified: true,
         phone: 'N/A'
       }, { onConflict: 'email' });
 
@@ -1155,9 +1163,10 @@ app.post('/api/admin/invite-doctor', authMiddleware, adminOnly, async (req, res)
     res.json({ success: true, message: 'Doctor invitation initiated successfully' });
   } catch (error) {
     console.error('SERVER ERROR — Invite doctor:', error);
-    res.status(500).json({ success: false, message: 'Server error during invite' });
+    res.status(500).json({ success: false, message: 'Server error during invite: ' + error.message });
   }
 });
+
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/doctor/register — complete doctor invitation
@@ -1270,8 +1279,11 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
             email: adminEmail,
             name: adminName,
             role: 'admin',
+            is_verified: true,
+            status: 'active',
             phone: 'N/A'
           }]);
+
 
         if (syncError) {
           console.error("Database sync error (non-fatal):", syncError);
@@ -1336,13 +1348,13 @@ app.post('/api/admin/invite-admin', authMiddleware, adminOnly, async (req, res) 
 // DELETE /api/admin/delete-user/:id — admin only
 // Deletes user from users table AND Supabase Auth
 // ═══════════════════════════════════════════════════════════
-app.delete('/api/admin/delete-user/:id', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/admin/delete-user/:id', authMiddleware, adminOnly, validateUuid, async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🗑️ Admin deleting user: ${id}`);
 
-    if (!id) {
-      return res.status(400).json({ success: false, message: 'User ID is required' });
+    if (!id || !isUuid(id)) {
+      return res.status(400).json({ success: false, message: 'Valid User ID (UUID) is required' });
     }
 
     // Protection: Don't allow deleting the admin user (checking by role)
@@ -1578,9 +1590,12 @@ app.post('/api/auth/complete-reset-password', async (req, res) => {
       .update({ 
         password: hashedPassword,
         reset_token: null,
-        reset_token_expiry: null
+        reset_token_expiry: null,
+        is_verified: true, // Verification happens after password reset too
+        status: 'active'
       })
       .eq('id', user.id);
+
 
     if (updateErr) {
       console.error('❌ Reset password — Database update failed:', updateErr.message);
@@ -2080,7 +2095,7 @@ app.get('/api/doctor/patients', authMiddleware, doctorOnly, async (req, res) => 
     // Deduplicate by user_id
     const patientMap = {};
     (apts || []).forEach(apt => {
-      if (!patientMap[apt.user_id]) {
+      if (apt.user_id && isUuid(apt.user_id) && !patientMap[apt.user_id]) {
         patientMap[apt.user_id] = {
           id: apt.user_id,
           name: apt.name || 'Patient',

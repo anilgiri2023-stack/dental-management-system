@@ -1,42 +1,38 @@
-const axios = require("axios");
+const { Resend } = require("resend"); 
 
-async function sendEmail({ to, subject, html }) {
-  try {
-    const response = await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: { email: process.env.SMTP_USER },
-        to: [{ email: to }],
-        subject: subject,
-        htmlContent: html
-      },
-      {
-        headers: {
-          "api-key": process.env.BREVO_API_KEY,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+const resend = new Resend(process.env.RESEND_API_KEY); 
 
-    console.log("✅ Email sent via Brevo API");
-    return { success: true };
+console.log("USING RESEND"); 
 
-  } catch (error) {
-    console.error("❌ Brevo API error:", error.response?.data || error.message);
+async function sendEmail({ to, subject, html }) { 
+  try { 
+    const data = await resend.emails.send({ 
+      from: `"Clinical Serenity" <${process.env.EMAIL_FROM}>`, 
+      to, 
+      subject, 
+      html, 
+    }); 
 
-    return {
-      success: false,
-      error: error.response?.data || error.message
-    };
-  }
-}
+    console.log("Email sent:", data.id); 
+    return { success: true }; 
+  } catch (error) { 
+    console.error("Email failed:", error); 
+    return { success: false }; 
+  } 
+} 
 
-async function sendOTP(email, otp) {
-  return await sendEmail({
-    to: email,
-    subject: "Dental OTP Verification",
-    html: `<h2>Your OTP is: ${otp}</h2><p>Valid for 5 minutes.</p>`
-  });
-}
+async function sendOTPEmail(to, otp) { 
+  const html = ` 
+    <h2>Your OTP Code</h2> 
+    <p>Your OTP is: <b>${otp}</b></p> 
+    <p>This code is valid for 5 minutes.</p> 
+  `; 
 
-module.exports = { sendEmail, sendOTP };
+  return sendEmail({ 
+    to, 
+    subject: "OTP Verification", 
+    html, 
+  }); 
+} 
+
+module.exports = { sendEmail, sendOTPEmail }; 
