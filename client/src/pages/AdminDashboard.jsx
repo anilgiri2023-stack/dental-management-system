@@ -611,37 +611,24 @@ export default function AdminDashboard() {
                           >
                             {/* Patient info */}
                             <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
-                                  <User className="w-4 h-4 text-primary" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-gray-900 truncate">
-                                    {apt.patient_name || 'N/A'}
-                                  </p>
-                                  <div className="flex flex-col gap-0.5 mt-0.5">
-                                    {apt.email && (
-                                      <p className="text-[11px] text-gray-400 truncate flex items-center gap-1">
-                                        <Mail className="w-3 h-3 shrink-0" />
-                                        {apt.email}
-                                      </p>
-                                    )}
-                                    {apt.phone && (
-                                      <p className="text-[11px] text-gray-400 truncate flex items-center gap-1 mt-0.5">
-                                        <Phone className="w-3 h-3 shrink-0" />
-                                        {apt.phone}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
+                               <div className="flex items-center gap-3">
+                                 <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
+                                   <User className="w-4 h-4 text-primary" />
+                                 </div>
+                                 <div className="min-w-0">
+                                   <p className="text-sm font-bold text-gray-900 truncate">
+                                     {apt.patient_name || 'N/A'}
+                                   </p>
+                                   <div className="text-[12px] text-gray-500 mt-0.5">
+                                     {apt.phone || ''}
+                                   </div>
+                                 </div>
+                               </div>
+                             </td>
 
                             {/* Doctor */}
-                            <td className="px-6 py-4 hidden sm:table-cell">
-                              <span className="text-sm font-medium text-gray-700">
-                                {apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'Assigned Doctor'}
-                              </span>
+                            <td className="px-6 py-4 hidden sm:table-cell text-sm text-gray-700">
+                               {apt.doctor_name || "N/A"}
                             </td>
 
                             {/* Service */}
