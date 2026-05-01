@@ -1,4 +1,4 @@
-const { Resend } = require("resend");
+import { Resend } from "resend";
 
 // Resend initialization (using environment variable)
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -8,7 +8,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
  * @param {Object} appointment - The appointment object containing patient and doctor details.
  * @param {string} status - The new status (Approved/Rejected/etc.).
  */
-const sendStatusEmail = async (appointment, status) => {
+export const sendStatusEmail = async (appointment, status) => {
   try {
     if (!appointment.email) {
       console.error("No patient email found, skipping notification.");
@@ -64,5 +64,3 @@ const sendStatusEmail = async (appointment, status) => {
     console.error("EMAIL ERROR:", error);
   }
 };
-
-module.exports = { sendStatusEmail };

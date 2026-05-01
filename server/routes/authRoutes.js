@@ -1,11 +1,13 @@
-const express = require('express');
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import authMiddleware from '../middleware/authMiddleware.js';
+import { sendEmail, sendOTPEmail } from '../services/emailService.js';
+import { saveOTP, verifyOTP } from '../services/otpStore.js';
+import { supabase } from '../utils/supabase.js';
+import crypto from 'crypto';
+
 const router = express.Router();
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const authMiddleware = require('../middleware/authMiddleware');
-const { sendEmail, sendOTPEmail } = require('../services/emailService');
-const { saveOTP, verifyOTP } = require('../services/otpStore');
-const { supabase } = require('../utils/supabase');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
 
@@ -266,7 +268,7 @@ router.post('/reset-password', async (req, res) => {
     }
 
     // 2. Generate a custom reset token
-    const resetToken = require('crypto').randomUUID();
+    const resetToken = crypto.randomUUID();
     
     // 3. Save token in users table (Source of Truth)
     const { error: updateError } = await supabase
@@ -314,4 +316,4 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

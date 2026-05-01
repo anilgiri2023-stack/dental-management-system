@@ -1,8 +1,10 @@
-const express = require('express');
+import express from 'express';
+import { supabase } from '../utils/supabase.js';
+import authMiddleware from '../middleware/authMiddleware.js';
+import { sendEmail } from '../services/emailService.js';
+import { sendStatusEmail } from '../utils/sendStatusEmail.js';
+
 const router = express.Router();
-const { supabase } = require('../utils/supabase');
-const authMiddleware = require('../middleware/authMiddleware');
-const { sendEmail } = require('../services/emailService');
 
 // Middleware for roles
 const adminOnly = (req, res, next) => req.user.role === 'admin' ? next() : res.status(403).json({ success: false, message: 'Admin only' });
@@ -95,7 +97,7 @@ router.post('/', authMiddleware, async (req, res) => {
       `
     });
 
-    res.status(201).json({ success: true, appointment: data });
+    res.status(201).json({ success: true, appointment: newAppointment });
   } catch (err) {
     console.error("CREATE APPOINTMENT ERROR:", err);
     res.status(500).json({ 
@@ -124,8 +126,6 @@ router.get('/my', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-const { sendStatusEmail } = require('../utils/sendStatusEmail');
 
 router.put('/:id/status', authMiddleware, async (req, res) => {
   try {
@@ -184,4 +184,4 @@ router.get('/booked-slots', authMiddleware, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

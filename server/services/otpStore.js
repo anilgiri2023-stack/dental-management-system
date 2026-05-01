@@ -6,7 +6,7 @@ const otpStore = new Map();
  * @param {string} otp 
  * @param {object} userData { name, phone }
  */
-function saveOTP(email, otp, userData = {}) {
+export function saveOTP(email, otp, userData = {}) {
   const emailKey = email.trim().toLowerCase();
   const expires = Date.now() + 5 * 60 * 1000; // 5 minutes
   
@@ -25,7 +25,7 @@ function saveOTP(email, otp, userData = {}) {
  * @param {string} otp 
  * @returns {object|null} The record if valid, null otherwise
  */
-function verifyOTP(email, otp) {
+export function verifyOTP(email, otp) {
   const emailKey = email.trim().toLowerCase();
   
   console.log("--- OTP Verification Debug ---");
@@ -57,5 +57,3 @@ function verifyOTP(email, otp) {
   console.log(`✅ OTP verified and deleted for ${emailKey}`);
   return { valid: true, record };
 }
-
-module.exports = { saveOTP, verifyOTP };

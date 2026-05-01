@@ -1,10 +1,11 @@
-const express = require('express');
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import { supabase } from '../utils/supabase.js';
+import authMiddleware from '../middleware/authMiddleware.js';
+import { sendEmail } from '../services/emailService.js';
+
 const router = express.Router();
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const { supabase } = require('../utils/supabase');
-const authMiddleware = require('../middleware/authMiddleware');
-const { sendEmail } = require('../services/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
 
@@ -143,10 +144,10 @@ router.get('/analytics', async (req, res) => {
     res.json({ 
       success: true,
       analytics: {
-        total: totalAppointments, // for user's Step 3
-        pending, // for user's Step 3
-        approved, // for user's Step 3
-        rejected, // for user's Step 3
+        total: totalAppointments, 
+        pending, 
+        approved, 
+        rejected, 
         totalAppointments,
         totalPatients,
         totalDoctors,
@@ -364,4 +365,4 @@ router.post('/delete-multiple-users', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

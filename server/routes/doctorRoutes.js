@@ -1,7 +1,7 @@
-const express = require('express');
-const { supabase } = require('../utils/supabase');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+import express from 'express';
+import { supabase } from '../utils/supabase.js';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 
@@ -140,13 +140,11 @@ router.get('/reports', async (req, res) => {
   }
 });
 
-router.get('/', async (req, res) => {
+router.get('/doctors', async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from('users')
-      .select('id, name, email')
-      .eq('role', 'doctor')
-      .eq('is_active', true); // Only show registered doctors
+      .from('doctors')
+      .select('*');
 
     if (error) {
       console.error('Supabase error fetching doctors:', error);
@@ -160,4 +158,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

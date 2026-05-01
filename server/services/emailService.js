@@ -1,4 +1,4 @@
-const { Resend } = require("resend"); 
+import { Resend } from "resend"; 
 
 // Initializing with environment variable
 const resend = new Resend(process.env.RESEND_API_KEY); 
@@ -8,7 +8,7 @@ console.log(`✅ Resend initialized (Using verified domain: roamflux.site)`);
 /**
  * Reusable generic email sending function using Resend API.
  */
-async function sendEmail({ to, subject, html, from }) { 
+export async function sendEmail({ to, subject, html, from }) { 
   try { 
     console.log(`📤 Sending email to: ${to}`);
     
@@ -43,7 +43,7 @@ async function sendEmail({ to, subject, html, from }) {
  * @param {string} to - Recipient email
  * @param {string} otp - The 6-digit OTP code
  */
-async function sendOTPEmail(to, otp) { 
+export async function sendOTPEmail(to, otp) { 
   const html = ` 
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
       <h2 style="color: #2e7d6b; text-align: center;">Your OTP Code</h2>
@@ -65,7 +65,7 @@ async function sendOTPEmail(to, otp) {
   }); 
 } 
 
-async function sendBookingEmail(to, appointment) {
+export async function sendBookingEmail(to, appointment) {
   const doctorName = appointment.doctor_name || appointment.doctor?.name || "our specialist";
   const html = `
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
@@ -87,5 +87,3 @@ async function sendBookingEmail(to, appointment) {
     html
   });
 }
-
-module.exports = { sendEmail, sendOTPEmail, sendBookingEmail }; 

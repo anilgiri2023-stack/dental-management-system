@@ -1,16 +1,17 @@
-require("dotenv").config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const multer = require('multer');
-const { supabase } = require('./utils/supabase');
-const { sendEmail } = require('./services/emailService');
+import dotenv from 'dotenv';
+dotenv.config();
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import multer from 'multer';
+import { supabase } from './utils/supabase.js';
+import { sendEmail } from './services/emailService.js';
 
-const authRoutes = require('./routes/authRoutes');
-const appointmentRoutes = require('./routes/appointmentRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const doctorRoutes = require('./routes/doctorRoutes');
-const authMiddleware = require('./middleware/authMiddleware');
+import authRoutes from './routes/authRoutes.js';
+import appointmentRoutes from './routes/appointmentRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import doctorRoutes from './routes/doctorRoutes.js';
+import authMiddleware from './middleware/authMiddleware.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,10 +33,16 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/doctor', doctorRoutes);
 
-// ─── Status Update (Specific Path) ────────────────────────
-// Route removed as part of consolidation to PUT /api/appointments/:id/status
+// Fix backend doctor API route
+app.use('/api', doctorRoutes);
+
+// Test route
+app.get("/test", (req, res) => res.send("Server working"));
+
+app.get('/', (req, res) => {
+  res.send('Dental Management System API is running...');
+});
 
 // ─── Reports & Avatars ────────────────────────────────────
 const upload = multer({ storage: multer.memoryStorage() });
@@ -219,25 +226,6 @@ app.get('/api/test-email', async (req, res) => {
     }
   } catch (err) {
     console.error("❌ [test-email] Error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.get('/', (req, res) => {
-  res.send('Dental Management System API is running...');
-});
-
-// GET /test-email - Quick test route as requested
-app.get('/test-email', async (req, res) => {
-  try {
-    console.log("📡 [test-email] Quick test triggered...");
-    const result = await sendEmail({
-      to: "onilofficial2005@gmail.com",
-      subject: "Test Email - Resend Verified",
-      html: "<h1>Resend is working with verified domain!</h1>"
-    });
-    res.json({ success: result.success, result });
-  } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
