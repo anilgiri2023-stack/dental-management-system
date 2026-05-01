@@ -601,121 +601,40 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredAppointments.map((apt) => {
-                        console.log("RENDERING:", apt);
-                        const statusCfg = STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending;
-                        const StatusIcon = statusCfg.icon;
-                        return (
-                          <tr
-                            key={apt.id}
-                            className="hover:bg-gray-50/50 transition-colors group"
-                          >
-                            {/* Patient info */}
-                            <td className="px-6 py-4">
-                               <div className="flex items-center gap-3">
-                                 <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
-                                   <User className="w-4 h-4 text-primary" />
-                                 </div>
-                                 <div className="min-w-0">
-                                   <p className="text-sm font-bold text-gray-900 truncate">
-                                     {apt.patient_name || apt.email || 'N/A'}
-                                   </p>
-                                   <div className="text-[12px] text-gray-500 mt-0.5">
-                                     {apt.phone || "No phone"}
-                                   </div>
-                                 </div>
-                               </div>
-                             </td>
+                      {filteredAppointments.map((apt) => (
+                        <tr key={apt.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <strong>{apt.patient_name || apt.email || "N/A"}</strong>
+                            <div className="text-[12px] text-gray-500">{apt.phone || "No phone"}</div>
+                          </td>
 
-                            {/* Doctor */}
-                            <td className="px-6 py-4 hidden sm:table-cell text-sm text-gray-700">
-                               {apt.doctor_name || "N/A"}
-                            </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {apt.doctor_name || "N/A"}
+                          </td>
 
-                            {/* Service */}
-                            <td className="px-6 py-4 hidden md:table-cell">
-                              <span className="text-sm text-gray-600">
-                                {SERVICE_LABELS[apt.service] || apt.service}
-                              </span>
+                          <td className="px-6 py-4 text-sm text-gray-600">
+                            {SERVICE_LABELS[apt.service] || apt.service}
+                          </td>
 
-                            </td>
+                          <td className="px-6 py-4 text-sm text-gray-600">
+                            {new Date(apt.date).toLocaleDateString()} {apt.time}
+                          </td>
 
-                            {/* Date & Time */}
-                            <td className="px-6 py-4 hidden lg:table-cell">
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <Calendar className="w-4 h-4 text-gray-400" />
-                                {new Date(apt.date).toLocaleDateString('en-US', {
-                                  weekday: 'short',
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </div>
-                              {apt.time && (
-                                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                                  <Clock className="w-3 h-3" />
-                                  {apt.time}
-                                </div>
-                              )}
-                            </td>
-
-                            {/* Status */}
-                            <td className="px-6 py-4">
-                              <div className="relative inline-block">
-                                <select
-                                  value={apt.status}
-                                  onChange={(e) =>
-                                    handleStatusChange(apt.id, e.target.value)
-                                  }
-                                  disabled={updatingId === apt.id}
-                                  className={`appearance-none pl-7 pr-8 py-1.5 rounded-full text-xs font-semibold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${statusCfg.color} ${
-                                    updatingId === apt.id ? 'opacity-50' : ''
-                                  }`}
-                                >
-                                  <option value="Pending">Pending</option>
-                                  <option value="Approved">Approved</option>
-                                  <option value="Rejected">Rejected</option>
-                                </select>
-                                {updatingId === apt.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none animate-spin" />
-                                ) : (
-                                  <StatusIcon className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                )}
-                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
-                              </div>
-                            </td>
-
-                            {/* Actions */}
-                            <td className="px-6 py-4 text-right">
-                              {showDeleteConfirm === apt.id ? (
-                                <div className="inline-flex items-center gap-2">
-                                  <button
-                                    onClick={() => handleDelete(apt.id)}
-                                    disabled={deletingId === apt.id}
-                                    className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                                  >
-                                    {deletingId === apt.id ? 'Deleting...' : 'Confirm'}
-                                  </button>
-                                  <button
-                                    onClick={() => setShowDeleteConfirm(null)}
-                                    className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setShowDeleteConfirm(apt.id)}
-                                  className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
-                                  title="Delete appointment"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          <td className="px-6 py-4">
+                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                              apt.status === "Approved" ? "bg-emerald-50 text-emerald-600" : 
+                              apt.status === "Rejected" ? "bg-red-50 text-red-600" : 
+                              "bg-amber-50 text-amber-600"
+                            }`}>
+                              {apt.status}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4 text-right">
+                            <button onClick={() => handleDelete(apt.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
