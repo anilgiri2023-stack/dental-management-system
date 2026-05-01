@@ -34,7 +34,7 @@ export default function PatientReports({ reports }) {
                   <p className="text-sm font-bold text-gray-900 truncate">
                     {r.title || 'Medical Report'}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor?.name || 'Doctor'}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor_name || 'N/A'}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {dayjs.utc(r.uploadedAt || r.created_at).local().format("MMM DD, YYYY • hh:mm A")}
                   </p>

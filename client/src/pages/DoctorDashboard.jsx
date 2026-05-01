@@ -110,12 +110,12 @@ function AppointmentCard({ apt, highlight, reports, onUpload, onEdit, onDelete, 
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-bold text-gray-900 truncate">
-            {apt.users?.name || apt.name || 'Patient'}
+            {apt?.patient_name || apt?.phone || 'Unknown Patient'}
           </p>
-          {(apt.users?.email || apt.email) && (
+          {apt?.email && (
             <p className="text-[11px] text-gray-400 truncate flex items-center gap-1">
               <Mail className="w-3 h-3 shrink-0" />
-              {apt.users?.email || apt.email}
+              {apt.email}
             </p>
           )}
         </div>
@@ -136,9 +136,9 @@ function AppointmentCard({ apt, highlight, reports, onUpload, onEdit, onDelete, 
             </span>
           )}
         </div>
-        {(apt.users?.phone || apt.phone) && (
+        {apt?.phone && (
           <div className="flex items-center gap-2 text-xs text-gray-400">
-            <Phone className="w-3.5 h-3.5 shrink-0" />{apt.users?.phone || apt.phone}
+            <Phone className="w-3.5 h-3.5 shrink-0" />{apt.phone}
           </div>
         )}
       </div>
@@ -544,11 +544,11 @@ export default function DoctorDashboard() {
                                   </div>
                                   <div className="min-w-0">
                                     <p className="text-sm font-semibold text-gray-900 truncate">
-                                      {apt.users?.name || apt.name || 'N/A'}
+                                      {apt?.patient_name || apt?.phone || 'Unknown Patient'}
                                     </p>
-                                    {(apt.users?.email || apt.email) && (
+                                    {apt?.email && (
                                       <p className="text-[11px] text-gray-400 truncate">
-                                        {apt.users?.email || apt.email}
+                                        {apt.email}
                                       </p>
                                     )}
                                   </div>
