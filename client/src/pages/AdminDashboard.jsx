@@ -618,10 +618,10 @@ export default function AdminDashboard() {
                                  </div>
                                  <div className="min-w-0">
                                    <p className="text-sm font-bold text-gray-900 truncate">
-                                     {apt.patient_name || 'N/A'}
+                                     {apt.patient_name || apt.email || 'N/A'}
                                    </p>
                                    <div className="text-[12px] text-gray-500 mt-0.5">
-                                     {apt.phone || ''}
+                                     {apt.phone || "No phone"}
                                    </div>
                                  </div>
                                </div>
@@ -785,9 +785,9 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                             <div className="flex flex-col text-xs text-gray-500">
-                              <p><b>Patient:</b> {apt.patient_name || "N/A"}</p>
+                              <p><b>Patient:</b> {apt.patient_name || apt.email || "N/A"}</p>
                               <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
-                                <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "N/A"}</span>
+                                <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "No phone"}</span>
                               </div>
                             </div>
                           </div>
