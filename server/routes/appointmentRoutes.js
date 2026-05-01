@@ -40,35 +40,39 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { service, date, time, doctor_id, notes } = req.body;
+    console.log("REQ BODY:", req.body);
+    const { service, date, time, doctor_id, patient_name, email, notes } = req.body;
 
-    // 🔥 Step 2: Fetch user email from Supabase Auth
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    const { data: userData, error: userError } = await supabase.auth.getUser(token);
-
-    if (userError || !userData?.user?.email) {
-      console.error("User email not found");
-      return res.status(400).json({ error: "User email missing" });
+    // 1. Validation
+    if (!doctor_id || !service || !date || !time || !patient_name || !email) {
+      const missing = [];
+      if (!doctor_id) missing.push("doctor_id");
+      if (!service) missing.push("service");
+      if (!date) missing.push("date");
+      if (!time) missing.push("time");
+      if (!patient_name) missing.push("patient_name");
+      if (!email) missing.push("email");
+      
+      console.log("❌ Validation failed:", missing);
+      return res.status(400).json({ 
+        success: false,
+        error: `Missing required fields: ${missing.join(", ")}` 
+      });
     }
-
-    const userEmail = userData.user.email;
-    console.log("BOOKING EMAIL:", userEmail);
 
     // Insert into DB
     const { data: newAppointment, error } = await supabase
       .from("appointments")
       .insert([{
-        user_id: userData.user.id,
-        email: userEmail,
+        user_id: req.user.id, // Using user ID from authMiddleware
+        email: email,
         doctor_id,
         service,
         date,
         time,
         notes: notes || "",
         status: "Pending",
-        name: req.body.name || userData.user.user_metadata?.name || ""
+        name: patient_name
       }])
       .select(`
         *,
@@ -81,7 +85,7 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(500).json({ error: "Insert failed" });
     }
 
-    console.log("APPOINTMENT EMAIL STORED:", newAppointment.email);
+    console.log("APPOINTMENT CREATED:", newAppointment.id);
 
     // Send confirmation email
     const doctorName = newAppointment.doctor?.name || "our specialist";
@@ -89,11 +93,19 @@ router.post('/', authMiddleware, async (req, res) => {
       to: newAppointment.email,
       subject: "Appointment Booked",
       html: `
-        <h2>Appointment Confirmed</h2>
-        <p>Your appointment has been booked successfully.</p>
-        <p><b>Doctor:</b> Dr. ${doctorName}</p>
-        <p><b>Date:</b> ${newAppointment.date}</p>
-        <p><b>Time:</b> ${newAppointment.time}</p>
+        <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #2e7d6b;">Appointment Confirmed</h2>
+          <p>Hello ${patient_name},</p>
+          <p>Your appointment has been booked successfully at <b>Clinical Serenity</b>.</p>
+          <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><b>Doctor:</b> Dr. ${doctorName}</p>
+            <p style="margin: 5px 0;"><b>Service:</b> ${service}</p>
+            <p style="margin: 5px 0;"><b>Date:</b> ${date}</p>
+            <p style="margin: 5px 0;"><b>Time:</b> ${time}</p>
+          </div>
+          <p>Status: <b>Pending Approval</b></p>
+          <p>Thank you for choosing us!</p>
+        </div>
       `
     });
 
