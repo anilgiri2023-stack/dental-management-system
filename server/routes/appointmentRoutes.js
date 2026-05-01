@@ -38,85 +38,67 @@ router.get('/', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', async (req, res) => {
+  console.log("==== NEW APPOINTMENT REQUEST ====");
+  console.log("REQ BODY:", req.body);
+  console.log("HEADERS:", req.headers);
+
+  const { name, email, phone, service, date, time, doctor_id } = req.body;
+  const patient_name = req.body.patient_name || name;
+
+  // Validation
+  if (!name || !email || !phone || !service || !date || !time || !doctor_id) {
+    console.log("❌ Missing fields:", { name, email, phone, service, date, time, doctor_id });
+    return res.status(400).json({ success: false, error: "Missing required fields" });
+  }
+
   try {
-    console.log("REQ BODY:", req.body);
-    const { service, date, time, doctor_id, patient_name, email, notes } = req.body;
-
-    // 1. Validation
-    if (!doctor_id || !service || !date || !time || !patient_name || !email) {
-      const missing = [];
-      if (!doctor_id) missing.push("doctor_id");
-      if (!service) missing.push("service");
-      if (!date) missing.push("date");
-      if (!time) missing.push("time");
-      if (!patient_name) missing.push("patient_name");
-      if (!email) missing.push("email");
-      
-      console.log("❌ Validation failed:", missing);
-      return res.status(400).json({ 
-        success: false,
-        error: `Missing required fields: ${missing.join(", ")}` 
-      });
-    }
-
-    // Insert into DB
-    const { data: newAppointment, error } = await supabase
-      .from("appointments")
-      .insert([{
-        user_id: req.user.id, // Using user ID from authMiddleware
-        email: email,
-        doctor_id,
-        service,
-        date,
-        time,
-        notes: notes || "",
-        status: "Pending",
-        name: patient_name
-      }])
-      .select(`
-        *,
-        doctor:users!appointments_doctor_id_fkey(name)
-      `)
-      .single();
+    const { data, error } = await supabase.from("appointments").insert([{
+      patient_name,
+      email,
+      phone,
+      service,
+      date,
+      time,
+      doctor_id
+    }]);
 
     if (error) {
-      console.error("Insert error:", error);
-      return res.status(500).json({ error: "Insert failed" });
+      console.log("❌ SUPABASE ERROR:", error);
+      return res.status(400).json({ success: false, error: error.message });
     }
 
-    console.log("APPOINTMENT CREATED:", newAppointment.id);
+    console.log("✅ APPOINTMENT CREATED:", data);
 
-    // Send confirmation email
-    const doctorName = newAppointment.doctor?.name || "our specialist";
-    await sendEmail({
-      to: newAppointment.email,
-      subject: "Appointment Booked",
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-          <h2 style="color: #2e7d6b;">Appointment Confirmed</h2>
-          <p>Hello ${patient_name},</p>
-          <p>Your appointment has been booked successfully at <b>Clinical Serenity</b>.</p>
-          <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <p style="margin: 5px 0;"><b>Doctor:</b> Dr. ${doctorName}</p>
-            <p style="margin: 5px 0;"><b>Service:</b> ${service}</p>
-            <p style="margin: 5px 0;"><b>Date:</b> ${date}</p>
-            <p style="margin: 5px 0;"><b>Time:</b> ${time}</p>
+    // Optional: Send confirmation email (non-blocking)
+    try {
+      await sendEmail({
+        to: email,
+        subject: "Appointment Booked - Clinical Serenity",
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+            <h2 style="color: #2e7d6b;">Appointment Confirmed</h2>
+            <p>Hello ${patient_name},</p>
+            <p>Your appointment has been booked successfully at <b>Clinical Serenity</b>.</p>
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 5px 0;"><b>Service:</b> ${service}</p>
+              <p style="margin: 5px 0;"><b>Date:</b> ${date}</p>
+              <p style="margin: 5px 0;"><b>Time:</b> ${time}</p>
+            </div>
+            <p>Status: <b>Pending Approval</b></p>
+            <p>Thank you for choosing us!</p>
           </div>
-          <p>Status: <b>Pending Approval</b></p>
-          <p>Thank you for choosing us!</p>
-        </div>
-      `
-    });
+        `
+      });
+    } catch (emailErr) {
+      console.warn("⚠️ Confirmation email failed:", emailErr.message);
+    }
 
-    res.status(201).json({ success: true, appointment: newAppointment });
+    res.json({ success: true, data });
+
   } catch (err) {
-    console.error("CREATE APPOINTMENT ERROR:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to create appointment",
-      error: err.message 
-    });
+    console.log("🔥 SERVER ERROR:", err);
+    res.status(500).json({ success: false, error: "Server error" });
   }
 });
 

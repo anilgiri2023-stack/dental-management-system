@@ -143,8 +143,9 @@ router.get('/reports', async (req, res) => {
 router.get('/doctors', async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from('doctors')
-      .select('*');
+      .from('users')
+      .select('id, name, email, role')
+      .eq('role', 'doctor');
 
     if (error) {
       console.error('Supabase error fetching doctors:', error);
