@@ -788,7 +788,6 @@ export default function AdminDashboard() {
                               <p><b>Patient:</b> {apt.patient_name || apt.email || "N/A"}</p>
                               <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
                                 <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "No phone"}</span>
-                              </div>
                             </div>
                           </div>
                         <div className="text-right shrink-0">
@@ -804,7 +803,8 @@ export default function AdminDashboard() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                   </div>
                 </div>
               );
