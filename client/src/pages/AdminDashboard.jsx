@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   Calendar,
@@ -74,8 +74,11 @@ export default function AdminDashboard() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   
   // User delete state
+  const [selectedUsers, setSelectedUsers] = useState([]);
   const [deletingUserId, setDeletingUserId] = useState(null);
   const [showDeleteUserConfirm, setShowDeleteUserConfirm] = useState(null);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   // Invite State
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -210,7 +213,7 @@ export default function AdminDashboard() {
     setSuccessMsg('');
     try {
       await authFetch(`/appointments/${id}/status`, {
-        method: 'PATCH',
+        method: 'PUT',
         body: JSON.stringify({ status: newStatus }),
       });
 
@@ -255,6 +258,7 @@ export default function AdminDashboard() {
 
       if (data.success) {
         setUsers(prev => prev.filter(u => u.id !== userId));
+        setSelectedUsers(prev => prev.filter(id => id !== userId));
         setShowDeleteUserConfirm(null);
         setSuccessMsg('User deleted successfully');
         setTimeout(() => setSuccessMsg(''), 4000);
@@ -268,6 +272,47 @@ export default function AdminDashboard() {
       setShowDeleteUserConfirm(null);
     } finally {
       setDeletingUserId(null);
+    }
+  };
+
+  // Filtered users for the current view (role-aware)
+  const filteredUsers = users.filter(u => {
+    if (userRoleFilter === 'admin') return u.role === 'admin';
+    if (userRoleFilter === 'doctor') return u.role === 'doctor';
+    return u.role === 'user' || u.role === 'patient';
+  });
+
+  // Selected users that are currently visible in the filtered list
+  const selectedInFilter = selectedUsers.filter(id => 
+    filteredUsers.some(u => u.id === id)
+  );
+
+  const handleDeleteSelectedUsers = async () => {
+    if (selectedInFilter.length === 0) return;
+    setDeletingSelected(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      const data = await authFetch('/admin/delete-multiple-users', {
+        method: 'POST',
+        body: JSON.stringify({ ids: selectedInFilter })
+      });
+
+      if (data.success) {
+        setUsers(prev => prev.filter(u => !selectedInFilter.includes(u.id)));
+        setSelectedUsers([]); // Clear all selections as requested
+        setShowBulkDeleteConfirm(false);
+        setSuccessMsg(data.message || 'Selected users deleted successfully');
+        setTimeout(() => setSuccessMsg(''), 4000);
+        fetchUsers(); // Refresh list as requested
+      } else {
+        setError(data.message || 'Failed to delete selected users');
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to delete selected users');
+    } finally {
+      setDeletingSelected(false);
     }
   };
 
@@ -292,11 +337,31 @@ export default function AdminDashboard() {
             <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <h1 className="text-lg font-bold text-gray-900">Admin Dashboard</h1>
               <p className="text-xs text-gray-500">Clinical Serenity Management</p>
             </div>
           </div>
+
+          {/* Navigation Links */}
+          <div className="hidden lg:flex items-center gap-6">
+            {[
+              { name: 'Home', path: '/' },
+              { name: 'About', path: '/about' },
+              { name: 'Services', path: '/services' },
+              { name: 'Doctors', path: '/doctors' },
+              { name: 'Gallery', path: '/gallery' },
+            ].map((link) => (
+              <Link
+                key={link.name}
+                to={link.path}
+                className="text-sm font-medium text-gray-500 hover:text-primary transition-colors"
+              >
+                {link.name}
+              </Link>
+            ))}
+          </div>
+
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-2 text-sm text-gray-500">
               <div className="w-8 h-8 bg-primary-50 rounded-full flex items-center justify-center">
@@ -552,20 +617,20 @@ export default function AdminDashboard() {
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-gray-900 truncate">
-                                    {apt.name}
+                                    {apt.users?.name || apt.name || 'N/A'}
                                   </p>
                                   <div className="flex flex-col gap-0.5 mt-0.5">
-                                    {apt.email && (
-                                      <span className="text-xs text-gray-400 flex items-center gap-1 truncate">
+                                    {(apt.users?.email || apt.email) && (
+                                      <p className="text-[11px] text-gray-400 truncate flex items-center gap-1">
                                         <Mail className="w-3 h-3 shrink-0" />
-                                        {apt.email}
-                                      </span>
+                                        {apt.users?.email || apt.email}
+                                      </p>
                                     )}
-                                    {apt.phone && (
-                                      <span className="text-xs text-gray-400 flex items-center gap-1 truncate">
+                                    {(apt.users?.phone || apt.phone) && (
+                                      <p className="text-[11px] text-gray-400 truncate flex items-center gap-1 mt-0.5">
                                         <Phone className="w-3 h-3 shrink-0" />
-                                        {apt.phone}
-                                      </span>
+                                        {apt.users?.phone || apt.phone}
+                                      </p>
                                     )}
                                   </div>
                                 </div>
@@ -575,7 +640,7 @@ export default function AdminDashboard() {
                             {/* Doctor */}
                             <td className="px-6 py-4 hidden sm:table-cell">
                               <span className="text-sm font-medium text-gray-700">
-                                {apt.doctorId?.name ? `Dr. ${apt.doctorId.name}` : 'N/A'}
+                                {apt.doctor?.name ? `Dr. ${apt.doctor.name}` : 'N/A'}
                               </span>
                             </td>
 
@@ -694,6 +759,8 @@ export default function AdminDashboard() {
                 })
                 .sort((a, b) => parseDateTime(a.date, a.time) - parseDateTime(b.date, b.time));
 
+              console.log("UPCOMING:", upcomingList);
+
               if (upcomingList.length === 0) return null;
 
               return (
@@ -704,15 +771,48 @@ export default function AdminDashboard() {
                   </div>
                   <div className="divide-y divide-gray-50">
                     {upcomingList.map((apt) => (
-                      <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-gray-50/50 transition-colors">
-                        <div className="text-sm text-gray-700">
-                          <span className="font-semibold text-gray-900">{apt.name}</span>
-                          <span className="mx-2 text-gray-300">→</span>
-                          <span className="font-medium text-emerald-600">{apt.doctorId?.name ? `Dr. ${apt.doctorId.name}` : 'N/A'}</span>
+                      <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor?.name || "N/A"}</span>
+                            <span className="text-gray-300">•</span>
+                            <div className="relative inline-block">
+                              <select
+                                value={apt.status}
+                                onChange={(e) => handleStatusChange(apt.id, e.target.value)}
+                                disabled={updatingId === apt.id}
+                                className={`appearance-none pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
+                                  apt.status === "Approved" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
+                                  apt.status === "Rejected" ? "bg-red-50 text-red-600 border-red-100" : 
+                                  "bg-amber-50 text-amber-600 border-amber-100"
+                                } ${updatingId === apt.id ? 'opacity-50' : ''}`}
+                              >
+                                <option value="Pending">Pending</option>
+                                <option value="Approved">Approved</option>
+                                <option value="Rejected">Rejected</option>
+                              </select>
+                              <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
+                            </div>
+                          </div>
+                          <div className="flex flex-col text-xs text-gray-500">
+                            <p><b>Patient:</b> {apt.users?.name || apt.name || "N/A"}</p>
+                            <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
+                              <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{apt.users?.email || apt.email || "N/A"}</span>
+                              <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.users?.phone || apt.phone || "N/A"}</span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-500 flex items-center gap-1.5 shrink-0">
-                          {new Date(`${apt.date} ${apt.time || '00:00'}`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          {apt.time && <> &bull; {new Date(`${apt.date} ${apt.time}`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</>}
+                        <div className="text-right shrink-0">
+                          <div className="text-sm font-semibold text-primary flex items-center justify-end gap-1.5">
+                            <Calendar className="w-4 h-4" />
+                            {new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                          {apt.time && (
+                            <div className="text-xs text-gray-400 mt-1 flex items-center justify-end gap-1.5">
+                              <Clock className="w-3.5 h-3.5" />
+                              {apt.time}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -728,9 +828,18 @@ export default function AdminDashboard() {
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <Users className="w-5 h-5 text-primary" />
                 All Users
-                <span className="text-sm font-normal text-gray-400">({users.length})</span>
+                <span className="text-sm font-normal text-gray-400">({filteredUsers.length})</span>
               </h2>
               <div className="flex items-center gap-4">
+                {selectedInFilter.length > 0 && (
+                  <button
+                    onClick={() => setShowBulkDeleteConfirm(true)}
+                    className="inline-flex items-center gap-2 bg-red-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-200 animate-fade-in-up"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete ({selectedInFilter.length})
+                  </button>
+                )}
                 <button
                   onClick={() => { setInviteRole('admin'); setShowInviteModal(true); }}
                   className="inline-flex items-center gap-2 bg-slate-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-slate-900 transition-colors"
@@ -823,6 +932,26 @@ export default function AdminDashboard() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-100">
+                        <th className="px-6 py-4 text-left w-10">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            checked={filteredUsers.length > 0 && filteredUsers.every(u => selectedUsers.includes(u.id))}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                // Add only filteredUsers IDs
+                                const newSelected = [...selectedUsers];
+                                filteredUsers.forEach(u => {
+                                  if (!newSelected.includes(u.id)) newSelected.push(u.id);
+                                });
+                                setSelectedUsers(newSelected);
+                              } else {
+                                // Remove only filteredUsers IDs
+                                setSelectedUsers(selectedUsers.filter(id => !filteredUsers.some(u => u.id === id)));
+                              }
+                            }}
+                          />
+                        </th>
                         <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                           User
                         </th>
@@ -841,14 +970,22 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {users
-                        .filter(u => {
-                          if (userRoleFilter === 'admin') return u.role === 'admin';
-                          if (userRoleFilter === 'doctor') return u.role === 'doctor';
-                          return u.role === 'user' || u.role === 'patient';
-                        })
-                        .map((u) => (
-                        <tr key={u.id} className="hover:bg-gray-50/50 transition-colors group">
+                      {filteredUsers.map((u) => (
+                        <tr key={u.id} className={`hover:bg-gray-50/50 transition-colors group ${selectedUsers.includes(u.id) ? 'bg-primary-50/30' : ''}`}>
+                          <td className="px-6 py-4">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                              checked={selectedUsers.includes(u.id)}
+                              onChange={() => {
+                                setSelectedUsers(prev => 
+                                  prev.includes(u.id) 
+                                    ? prev.filter(id => id !== u.id) 
+                                    : [...prev, u.id]
+                                );
+                              }}
+                            />
+                          </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
@@ -870,12 +1007,14 @@ export default function AdminDashboard() {
                           <td className="px-6 py-4 hidden sm:table-cell">
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
                               u.role === 'admin'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                ? (u.status === 'invited' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
                                 : u.role === 'doctor'
-                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                ? (u.is_active === false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200')
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}>
-                              {u.role === 'user' ? 'patient' : u.role || 'patient'}
+                              {u.role === 'admin' && u.status === 'invited' ? 'invited admin' : 
+                               u.role === 'doctor' && u.is_active === false ? 'invited doctor' : 
+                               (u.role === 'user' ? 'patient' : u.role || 'patient')}
                             </span>
                           </td>
                           <td className="px-6 py-4">
@@ -1100,6 +1239,65 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+        {/* Bulk Delete User Confirmation */}
+        {showBulkDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Multiple Users?</h3>
+              <p className="text-gray-500 text-sm mb-6">
+                Are you sure you want to delete {selectedInFilter.length} selected users? This will permanently remove their accounts and data. This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowBulkDeleteConfirm(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteSelectedUsers}
+                  disabled={deletingSelected}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {deletingSelected ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete User Confirmation */}
+        {showDeleteUserConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Delete User Account?</h3>
+              <p className="text-gray-500 text-sm mb-6">
+                Are you sure you want to delete this user? This will permanently remove their account and all associated data. This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteUserConfirm(null)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDeleteUser(showDeleteUserConfirm)}
+                  disabled={deletingUserId === showDeleteUserConfirm}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {deletingUserId === showDeleteUserConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete User'}
+                </button>
+              </div>
             </div>
           </div>
         )}

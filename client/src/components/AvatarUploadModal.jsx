@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Camera, X, Loader2, Upload, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { uploadFetch } from '../utils/api';
+import { uploadFetch } from '../api';
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 

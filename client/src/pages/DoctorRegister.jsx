@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Sparkles, ShieldCheck } from 'lucide-react';
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../api';
 
 export default function DoctorRegister() {
   const [searchParams] = useSearchParams();

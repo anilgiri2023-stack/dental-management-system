@@ -26,14 +26,14 @@ export default function UserProtectedRoute({ children }) {
 
   // Admin trying to access user pages → redirect to admin dashboard
   if (isAdminLoggedIn) {
-    console.log('🛡️ UserProtectedRoute: Admin detected, redirecting to /admin/dashboard');
-    return <Navigate to="/admin/dashboard" replace />;
+    console.log('🛡️ UserProtectedRoute: Admin detected, redirecting to /admin-dashboard');
+    return <Navigate to="/admin-dashboard" replace />;
   }
 
   // Doctor trying to access user pages → redirect to doctor dashboard
   if (user?.role === 'doctor') {
-    console.log('🛡️ UserProtectedRoute: Doctor detected, redirecting to /doctor');
-    return <Navigate to="/doctor" replace />;
+    console.log('🛡️ UserProtectedRoute: Doctor detected, redirecting to /doctor-dashboard');
+    return <Navigate to="/doctor-dashboard" replace />;
   }
 
   console.log('🛡️ UserProtectedRoute: Access granted for user', user?.email);

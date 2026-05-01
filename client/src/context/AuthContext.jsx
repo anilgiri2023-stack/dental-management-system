@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { apiFetch } from '../utils/api';
-import { sendOtp as apiSendOtp, verifyOtp as apiVerifyOtp } from '../api';
+import { apiFetch, sendOtp as apiSendOtp, verifyOtp as apiVerifyOtp } from '../api';
+
 
 const AuthContext = createContext(null);
 
@@ -8,11 +8,11 @@ export function AuthProvider({ children }) {
   // Initialize user from localStorage for instant role detection on refresh
   const [user, setUser] = useState(() => {
     try {
-      const saved = localStorage.getItem('cs_user');
+      const saved = localStorage.getItem('user');
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
-  const [token, setToken] = useState(() => localStorage.getItem('cs_token'));
+  const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   // Derive states from user
@@ -24,14 +24,14 @@ export function AuthProvider({ children }) {
   // Persist user to localStorage whenever it changes
   useEffect(() => {
     console.log('👤 AuthContext state:', { 
-      user: user ? { id: user.id, email: user.email, role: user.role } : null, 
+      user: user ? { id: user.id, email: user.email, role: user.role, name: user.name } : null, 
       loading,
       isAuthenticated 
     });
     if (user) {
-      localStorage.setItem('cs_user', JSON.stringify(user));
+      localStorage.setItem('user', JSON.stringify(user));
     } else {
-      localStorage.removeItem('cs_user');
+      localStorage.removeItem('user');
     }
   }, [user, loading]);
 
@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const validateSession = async () => {
       console.log('🔄 AuthContext: Validating session on mount...');
-      const savedToken = localStorage.getItem('cs_token');
+      const savedToken = localStorage.getItem('token');
       if (!savedToken) {
         console.log('🔄 AuthContext: No saved token found, user is null');
         setUser(null);
@@ -57,13 +57,13 @@ export function AuthProvider({ children }) {
       }
       try {
         const data = await apiFetch('/auth/me');
-        console.log('🔄 AuthContext: Session validated:', { role: data.user?.role, email: data.user?.email });
+        console.log('🔄 AuthContext: Session validated:', { role: data.user?.role, email: data.user?.email, name: data.user?.name });
         setUser(data.user);
         setToken(savedToken);
       } catch (err) {
         console.error('❌ AuthContext: Session validation error:', err);
-        localStorage.removeItem('cs_token');
-        localStorage.removeItem('cs_user');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
         setToken(null);
         setUser(null);
       } finally {
@@ -76,11 +76,11 @@ export function AuthProvider({ children }) {
   // ─── OTP Auth Functions ───
 
   // Send OTP to email or phone
-  const sendOtp = async (identifier, type) => {
+  const sendOtp = async (identifier, type, name, phone) => {
     if (process.env.NODE_ENV === 'development') {
       console.log(`📧 Sending OTP to ${identifier} (${type})`);
     }
-    return apiSendOtp(identifier);
+    return apiSendOtp(identifier, name, phone);
   };
 
   // Verify OTP and login — returns user with role
@@ -95,7 +95,7 @@ export function AuthProvider({ children }) {
       console.log('📦 verify-otp response:', { 
         success: data.success, 
         hasToken: !!data.token, 
-        user: data.user ? { id: data.user.id, email: data.user.email, role: data.user.role } : null 
+        user: data.user ? { id: data.user.id, email: data.user.email, role: data.user.role, name: data.user.name } : null 
       });
 
       // Validate session: must have both token and user
@@ -122,12 +122,11 @@ export function AuthProvider({ children }) {
     }
 
     console.log('✅ Session established successfully');
-    console.log('🔐 Session token:', data.token ? `${data.token.substring(0, 20)}...` : 'MISSING');
-    console.log('👤 Authenticated user:', { id: data.user.id, email: data.user.email, role: data.user.role });
+    console.log('USER AFTER LOGIN:', data.user);
 
-    // Save session — user object includes id, email, role
-    localStorage.setItem('cs_token', data.token);
-    localStorage.setItem('cs_user', JSON.stringify(data.user));
+    // Save session — user object includes id, email, role, name
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.token);
     setUser(data.user);
     return data;
@@ -138,14 +137,14 @@ export function AuthProvider({ children }) {
     if (process.env.NODE_ENV === 'development') {
       console.log('🔐 Admin login attempt...');
     }
-    const data = await apiFetch('/api/admin/login', {
+    const data = await apiFetch('/admin/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: { email, password },
     });
 
     console.log('✅ Admin login successful');
-    localStorage.setItem('cs_token', data.token);
-    localStorage.setItem('cs_user', JSON.stringify(data.user));
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.token);
     setUser(data.user);
     return data;
@@ -154,14 +153,14 @@ export function AuthProvider({ children }) {
   // ─── Doctor Auth ───
   const doctorLogin = async (email, password) => {
     console.log('🩺 Doctor login attempt...');
-    const data = await apiFetch('/api/doctor/login', {
+    const data = await apiFetch('/doctor/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: { email, password },
     });
 
     console.log('✅ Doctor login successful, user:', data.user);
-    localStorage.setItem('cs_token', data.token);
-    localStorage.setItem('cs_user', JSON.stringify(data.user));
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
     setToken(data.token);
     setUser(data.user);
     return data;
@@ -169,8 +168,8 @@ export function AuthProvider({ children }) {
 
   // ─── Logout ───
   const logout = async () => {
-    localStorage.removeItem('cs_token');
-    localStorage.removeItem('cs_user');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setToken(null);
     setUser(null);
   };
@@ -178,19 +177,27 @@ export function AuthProvider({ children }) {
   const adminLogout = logout;
 
   // ─── Update Profile ───
-  const updateProfile = async (name) => {
+  const updateProfile = async ({ name, phone }) => {
     const data = await authFetch('/auth/update-profile', {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ email: user.email, name, phone }),
     });
-    if (data.token) {
-      localStorage.setItem('cs_token', data.token);
-      setToken(data.token);
-      setUser(prev => {
-        const updated = { ...prev, name };
-        localStorage.setItem('cs_user', JSON.stringify(updated));
-        return updated;
-      });
+    
+    if (data.success) {
+      // Fetch fresh user data from backend (Issue 1 Fix)
+      try {
+        const freshData = await apiFetch('/auth/me');
+        if (freshData.success && freshData.user) {
+          localStorage.setItem('user', JSON.stringify(freshData.user));
+          setUser(freshData.user);
+        }
+      } catch (err) {
+        console.error('❌ Failed to refresh user data:', err);
+        // Fallback to manual update if fetch fails
+        const updatedUser = { ...user, name, phone };
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        setUser(updatedUser);
+      }
     }
     return data;
   };

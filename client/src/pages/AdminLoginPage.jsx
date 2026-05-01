@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Eye, EyeOff, Loader2 } from 'lucide-react';
 import Logo from '../components/Logo';
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../api';
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
@@ -22,6 +22,7 @@ export default function AdminLoginPage() {
     setError('');
     setLoading(true);
     try {
+      localStorage.clear(); // Clear any old sessions
       await adminLogin(email, password);
       navigate('/admin/dashboard');
     } catch (err) {

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../api';
 import {
   Sparkles, ArrowRight, CheckCircle2, Mail, Phone,
   ShieldCheck, ArrowLeft, RefreshCw, Loader2, UserPlus, LogIn,
@@ -33,9 +33,9 @@ export default function PatientLoginPage() {
 
   useEffect(() => {
     if (isAuthenticated && !isAuthFlow) {
-      if (isAdminLoggedIn) navigate('/admin/dashboard');
-      else if (user?.role === 'doctor') navigate('/doctor');
-      else navigate('/patient');
+      if (isAdminLoggedIn) navigate('/admin-dashboard');
+      else if (user?.role === 'doctor') navigate('/doctor-dashboard');
+      else navigate('/appointments');
     }
   }, [isAuthenticated, isAdminLoggedIn, user, navigate, isAuthFlow]);
 
@@ -68,7 +68,11 @@ export default function PatientLoginPage() {
     try {
       const result = await apiFetch('/auth/check-user', {
         method: 'POST',
-        body: JSON.stringify({ email: identifier.trim() }),
+        body: JSON.stringify({ 
+          email: identifier.trim(),
+          name: isNewUser ? name : undefined,
+          phone: isNewUser ? phone : undefined
+        }),
       });
 
       if (result.exists) {
@@ -123,6 +127,17 @@ export default function PatientLoginPage() {
 
     setLoading(true);
     try {
+      // Ensure user is created/synced with name before sending OTP
+      console.log("Sending name:", name.trim());
+      await apiFetch('/auth/check-user', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          email: identifier.trim(), 
+          name: name.trim(), 
+          phone: phone.trim() 
+        }),
+      });
+
       const otpResult = await sendOtp(identifier.trim(), 'email');
       setStep('otp');
       setOtp(Array(OTP_LENGTH).fill(''));
@@ -154,17 +169,21 @@ export default function PatientLoginPage() {
     setSuccess('');
     setLoading(true);
 
-    const otpString = otp.join('');
-    if (otpString.length !== OTP_LENGTH) { setError('Please enter the full verification code'); setLoading(false); return; }
+    const otpCode = otp.join('');
+    if (otpCode.length !== OTP_LENGTH) { setError('Please enter the full 6-digit verification code'); setLoading(false); return; }
+
+    console.log("Sending Email:", identifier.trim());
+    console.log("Sending OTP:", otpCode);
 
     try {
+      localStorage.clear(); // Clear any old sessions
       const result = await verifyOtp(
-        identifier.trim(), 'email', otpString,
+        identifier.trim(), 'email', otpCode,
         isNewUser ? name.trim() : undefined,
         isNewUser ? phone.trim() : undefined
       );
       setSuccess('Verification successful! Redirecting...');
-      const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor' : '/patient';
+      const dest = result.user?.role === 'admin' ? '/admin-dashboard' : result.user?.role === 'doctor' ? '/doctor-dashboard' : '/appointments';
       setTimeout(() => navigate(dest), 800);
     } catch (err) {
       setError(err.message);
@@ -183,13 +202,13 @@ export default function PatientLoginPage() {
     if (value && index < OTP_LENGTH - 1) otpRefs.current[index + 1]?.focus();
     if (newOtp.every(d => d !== '') && newOtp.join('').length === OTP_LENGTH) {
       setTimeout(() => {
-        const otpStr = newOtp.join('');
+        const otpCode = newOtp.join('');
         setLoading(true);
         setError('');
-        verifyOtp(identifier.trim(), 'email', otpStr, isNewUser ? name.trim() : undefined, isNewUser ? phone.trim() : undefined)
+        verifyOtp(identifier.trim(), 'email', otpCode, isNewUser ? name.trim() : undefined, isNewUser ? phone.trim() : undefined)
           .then((result) => {
             setSuccess('Verification successful! Redirecting...');
-            const dest = result.user?.role === 'admin' ? '/admin/dashboard' : result.user?.role === 'doctor' ? '/doctor' : '/patient';
+            const dest = result.user?.role === 'admin' ? '/admin-dashboard' : result.user?.role === 'doctor' ? '/doctor-dashboard' : '/appointments';
             setTimeout(() => navigate(dest), 800);
           })
           .catch(err => { setError(err.message); setOtp(Array(OTP_LENGTH).fill('')); setTimeout(() => otpRefs.current[0]?.focus(), 100); })

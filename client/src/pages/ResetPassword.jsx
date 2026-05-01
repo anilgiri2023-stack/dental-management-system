@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '../utils/api';
+import { apiFetch } from '../api';
 import { supabase } from '../utils/supabase';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -63,7 +63,7 @@ export default function ResetPassword() {
     setLoading(true);
     try {
       // Use backend API to update password (Requirement #4)
-      await apiFetch('/auth/complete-reset-password', {
+      await apiFetch('/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({
           password: password,

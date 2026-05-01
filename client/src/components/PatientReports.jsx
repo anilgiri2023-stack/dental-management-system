@@ -20,8 +20,8 @@ export default function PatientReports({ reports }) {
   return (
     <div className="grid gap-4">
       {reports.map(r => {
-        // The backend now provides full public URLs for all files
-        const downloadUrl = r.file_url;
+        // Use report_url as the source for downloads
+        const downloadUrl = r.report_url;
 
         return (
           <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6 hover:shadow-md transition-all">
@@ -34,22 +34,20 @@ export default function PatientReports({ reports }) {
                   <p className="text-sm font-bold text-gray-900 truncate">
                     {r.title || 'Medical Report'}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor_name || 'Doctor'}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">By Dr. {r.doctor?.name || 'Doctor'}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {dayjs.utc(r.uploadedAt || r.created_at).local().format("MMM DD, YYYY • hh:mm A")}
                   </p>
 
                 </div>
               </div>
-              <a 
-                href={downloadUrl} 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                download 
-                className="inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-dark transition-all shrink-0"
+              <button 
+                onClick={() => window.open(downloadUrl, '_blank')}
+                disabled={!downloadUrl}
+                className="inline-flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary-dark transition-all shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4" /> Download
-              </a>
+              </button>
             </div>
           </div>
         );

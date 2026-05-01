@@ -48,7 +48,13 @@ export default function UserDashboard() {
 
   const { user, logout, authFetch, updateProfile } = useAuth();
   const navigate = useNavigate();
-  const displayName = user?.name || user?.email?.split('@')[0] || user?.phone || 'User';
+  
+  // Debug check (Step 5)
+  useEffect(() => {
+    if (user) console.log('👤 Dashboard User Object:', user);
+  }, [user]);
+
+  const displayName = user?.name || user?.email?.split('@')[0] || 'User';
 
   const fetchAppointments = async () => {
     setLoading(true);
@@ -85,7 +91,7 @@ export default function UserDashboard() {
 
   const handleSaveName = async () => {
     if (!newName.trim()) return;
-    try { await updateProfile(newName.trim()); setEditingName(false); } catch (err) { console.error(err); }
+    try { await updateProfile({ name: newName.trim(), phone: user.phone }); setEditingName(false); } catch (err) { console.error(err); }
   };
 
   const filteredAppointments = appointments.filter(a => {
@@ -105,6 +111,26 @@ export default function UserDashboard() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <Logo />
+          
+          {/* Navigation Links */}
+          <div className="hidden lg:flex items-center gap-6">
+            {[
+              { name: 'Home', path: '/' },
+              { name: 'About', path: '/about' },
+              { name: 'Services', path: '/services' },
+              { name: 'Doctors', path: '/doctors' },
+              { name: 'Gallery', path: '/gallery' },
+            ].map((link) => (
+              <Link
+                key={link.name}
+                to={link.path}
+                className="text-sm font-medium text-gray-500 hover:text-primary transition-colors"
+              >
+                {link.name}
+              </Link>
+            ))}
+          </div>
+
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex items-center gap-2">
               <div className="w-8 h-8 bg-primary-50 rounded-full flex items-center justify-center"><User className="w-4 h-4 text-primary" /></div>
@@ -132,13 +158,15 @@ export default function UserDashboard() {
         {/* Welcome */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1">Welcome back, <span className="text-primary">{displayName}</span></h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1">
+              Welcome back, {user?.name || "User"}
+            </h1>
             <p className="text-gray-500 text-sm">
               {user?.email && <span className="mr-3">{user.email}</span>}
               {user?.phone && <span>{user.phone}</span>}
             </p>
           </div>
-          <Link to="/dashboard/book" id="book-appointment-btn" className="inline-flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl text-sm font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 group shrink-0">
+          <Link to="/book-appointment" id="book-appointment-btn" className="inline-flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl text-sm font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 group shrink-0">
             <Plus className="w-4 h-4" /> Book Appointment <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
@@ -227,7 +255,7 @@ export default function UserDashboard() {
                           <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0"><Stethoscope className="w-5 h-5 text-primary" /></div>
                           <div className="min-w-0">
                             <p className="text-sm font-bold text-gray-900">{SERVICE_LABELS[apt.service] || apt.service}</p>
-                            <p className="text-xs text-gray-400">{apt.service}</p>
+                            <p className="text-xs text-gray-400">Dr. {apt.doctor?.name || 'Assigned Doctor'}</p>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-4 text-sm text-gray-600">

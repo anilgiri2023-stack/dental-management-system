@@ -15,16 +15,9 @@ const navLinks = [
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoginDropdownOpen, setIsLoginDropdownOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, user, logout } = useAuth();
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   useEffect(() => {
     setIsOpen(false);
@@ -43,220 +36,123 @@ export default function Navbar() {
   const displayName = user?.name || user?.email?.split('@')[0] || user?.phone || 'User';
 
   return (
-    <nav
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled
-          ? 'bg-white/95 backdrop-blur-md shadow-lg py-3'
-          : 'bg-white py-4'
-      }`}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between">
-          {/* Logo */}
-          <Logo />
+    <nav className="w-full bg-white border-b shadow-sm sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
 
-          {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <Link
-                key={link.name}
-                to={link.path}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
-                  location.pathname === link.path
-                    ? 'text-primary bg-primary-50'
-                    : 'text-gray-600 hover:text-primary hover:bg-gray-50'
-                }`}
-              >
-                {link.name}
-              </Link>
-            ))}
-          </div>
+        {/* LEFT: LOGO */}
+        <Logo />
 
-          {/* CTA Buttons */}
-          <div className="hidden md:flex items-center gap-3">
-            {isAuthenticated ? (
-              <>
-                <Link
-                  to={
-                    user?.role === 'admin'
-                      ? '/admin/dashboard'
-                      : user?.role === 'doctor'
-                      ? '/doctor'
-                      : '/patient'
-                  }
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-primary px-4 py-2.5 rounded-full hover:bg-primary-50 transition-all duration-300"
-                >
-                  <LayoutDashboard className="w-4 h-4" />
-                  Dashboard
-                </Link>
-                <div className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 px-3 py-2">
-                  <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center bg-primary-50 shrink-0">
-                    {user?.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt={displayName}
-                        className="w-full h-full object-cover"
-                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }}
-                      />
-                    ) : null}
-                    <User className={`w-3.5 h-3.5 text-primary ${user?.avatar_url ? 'hidden' : ''}`} />
-                  </div>
-                  <span className="text-gray-700">{displayName}</span>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  id="navbar-logout"
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-red-500 px-4 py-2.5 rounded-full hover:bg-red-50 transition-all duration-300"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Logout
-                </button>
-              </>
-            ) : (
-              <div className="relative">
-                <button
-                  onClick={() => setIsLoginDropdownOpen(!isLoginDropdownOpen)}
-                  className="inline-flex items-center gap-2 bg-gray-900 text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-gray-800 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-                >
-                  <LogIn className="w-4 h-4" />
-                  Login / Sign Up
-                </button>
-                
-                {/* Dropdown Menu */}
-                {isLoginDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden animate-fade-in-up">
-                    <Link
-                      to="/login/patient"
-                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors border-b border-gray-50"
-                    >
-                      Patient Login
-                    </Link>
-                    <Link
-                      to="/login/doctor"
-                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors border-b border-gray-50"
-                    >
-                      Doctor Login
-                    </Link>
-                    <Link
-                      to="/login/admin"
-                      className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary-50 hover:text-primary transition-colors"
-                    >
-                      Admin Login
-                    </Link>
-                  </div>
-                )}
-              </div>
-            )}
+        {/* CENTER: NAV LINKS */}
+        <div className="hidden md:flex items-center gap-8 text-gray-600 font-medium">
+          {navLinks.map((link) => (
             <Link
-              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/dashboard/book") : "/login"}
-              className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-primary-dark transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5"
+              key={link.name}
+              to={link.path}
+              className={`hover:text-teal-500 transition-colors ${
+                location.pathname === link.path ? 'text-teal-500 font-semibold' : ''
+              }`}
             >
-              {isAuthenticated && (user?.role === 'doctor' || user?.role === 'admin') ? "Go to Dashboard" : "Book Appointment"}
+              {link.name}
             </Link>
-          </div>
-
-          {/* Mobile Menu Button */}
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            className="md:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
-            aria-label="Toggle menu"
-          >
-            {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
+          ))}
         </div>
 
-        {/* Mobile Menu */}
-        <div
-          className={`md:hidden transition-all duration-300 overflow-hidden ${
-            isOpen ? 'max-h-[600px] opacity-100 mt-4' : 'max-h-0 opacity-0'
-          }`}
-        >
-          <div className="bg-gray-50 rounded-2xl p-4 space-y-1">
-            {navLinks.map((link) => (
+        {/* RIGHT: ACTION BUTTONS */}
+        <div className="hidden md:flex items-center gap-4">
+          {isAuthenticated ? (
+            <div className="flex items-center gap-4">
               <Link
-                key={link.name}
-                to={link.path}
-                className={`block px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                  location.pathname === link.path
-                    ? 'bg-primary text-white'
-                    : 'text-gray-600 hover:bg-white hover:text-primary'
-                }`}
+                to={
+                  user?.role === 'admin'
+                    ? '/admin-dashboard'
+                    : user?.role === 'doctor'
+                    ? '/doctor-dashboard'
+                    : '/appointments'
+                }
+                className="text-gray-600 hover:text-teal-500 font-medium transition"
               >
-                {link.name}
+                Dashboard
               </Link>
-            ))}
-
-            {/* Mobile auth links */}
-            {isAuthenticated ? (
-              <>
-                <Link
-                  to={
-                    user?.role === 'admin'
-                      ? '/admin/dashboard'
-                      : user?.role === 'doctor'
-                      ? '/doctor'
-                      : '/patient'
-                  }
-                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <LayoutDashboard className="w-4 h-4" />
-                    Dashboard
-                  </span>
-                </Link>
-                <div className="px-4 py-3 text-sm font-medium text-gray-700 flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-primary-50 shrink-0">
-                    {user?.avatar_url ? (
-                      <img src={user.avatar_url} alt={displayName} className="w-full h-full object-cover" />
-                    ) : (
-                      <User className="w-3.5 h-3.5 text-primary" />
-                    )}
-                  </div>
-                  {displayName}
+              <div className="flex items-center gap-2 text-gray-700 font-medium px-2">
+                <div className="w-8 h-8 rounded-full bg-teal-50 flex items-center justify-center border border-teal-100 overflow-hidden">
+                  {user?.avatar_url ? (
+                    <img src={user.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-4 h-4 text-teal-600" />
+                  )}
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="block w-full text-left px-4 py-3 rounded-xl text-sm font-medium text-red-500 hover:bg-white transition-all"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <LogOut className="w-4 h-4" />
-                    Logout
-                  </span>
-                </button>
+                <span className="text-sm hidden lg:inline">{displayName}</span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="text-gray-500 hover:text-red-500 transition"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative group">
+              <button
+                onClick={() => setIsLoginDropdownOpen(!isLoginDropdownOpen)}
+                className="px-5 py-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 transition font-medium text-sm flex items-center gap-2"
+              >
+                <LogIn className="w-4 h-4" />
+                Login / Sign Up
+              </button>
+              
+              {isLoginDropdownOpen && (
+                <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden animate-fade-in-up z-50">
+                  <Link to="/login/patient" className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-teal-50 hover:text-teal-600 transition-colors border-b border-gray-50">Patient Login</Link>
+                  <Link to="/login/doctor" className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-teal-50 hover:text-teal-600 transition-colors border-b border-gray-50">Doctor Login</Link>
+                  <Link to="/login/admin" className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-teal-50 hover:text-teal-600 transition-colors">Admin Login</Link>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Link
+            to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin-dashboard' : '/doctor-dashboard') : "/appointments") : "/login"}
+            className="px-5 py-2 rounded-full bg-teal-500 text-white font-medium hover:bg-teal-600 transition shadow text-sm"
+          >
+            {isAuthenticated && (user?.role === 'doctor' || user?.role === 'admin') ? "Go to Dashboard" : "Book Appointment"}
+          </Link>
+        </div>
+
+        {/* Mobile Menu Button */}
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="md:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+        >
+          {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {/* Mobile Menu */}
+      {isOpen && (
+        <div className="md:hidden bg-white border-t p-4 space-y-4 animate-fade-in shadow-xl">
+          <div className="flex flex-col gap-4 text-gray-600 font-medium">
+            {navLinks.map((link) => (
+              <Link key={link.name} to={link.path} className="hover:text-teal-500 transition">{link.name}</Link>
+            ))}
+          </div>
+          <div className="pt-4 border-t flex flex-col gap-3">
+            {!isAuthenticated ? (
+              <>
+                <Link to="/login/patient" className="px-5 py-2 text-center rounded-full border border-gray-300 text-gray-700">Patient Login</Link>
+                <Link to="/login/doctor" className="px-5 py-2 text-center rounded-full border border-gray-300 text-gray-700">Doctor Login</Link>
               </>
             ) : (
-              <div className="space-y-1 mt-2 border-t border-gray-200 pt-2">
-                <p className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Login Portals</p>
-                <Link
-                  to="/login/patient"
-                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
-                >
-                  Patient Login
-                </Link>
-                <Link
-                  to="/login/doctor"
-                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
-                >
-                  Doctor Login
-                </Link>
-                <Link
-                  to="/login/admin"
-                  className="block px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:text-primary transition-all"
-                >
-                  Admin Login
-                </Link>
-              </div>
+              <button onClick={handleLogout} className="px-5 py-2 text-center rounded-full border border-red-200 text-red-500">Logout</button>
             )}
-
             <Link
-              to={isAuthenticated ? (user?.role === 'doctor' || user?.role === 'admin' ? (user?.role === 'admin' ? '/admin/dashboard' : '/doctor') : "/dashboard/book") : "/login"}
-              className="block text-center bg-primary text-white px-6 py-3 rounded-xl text-sm font-semibold mt-3 hover:bg-primary-dark transition-colors"
+              to="/appointments"
+              className="px-5 py-2 rounded-full bg-teal-500 text-white text-center font-medium shadow"
             >
               Book Appointment
             </Link>
           </div>
         </div>
-      </div>
+      )}
     </nav>
   );
 }

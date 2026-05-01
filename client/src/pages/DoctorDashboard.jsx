@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ReportUploadModal from '../components/ReportUploadModal';
 import AvatarUploadModal from '../components/AvatarUploadModal';
@@ -109,8 +109,15 @@ function AppointmentCard({ apt, highlight, reports, onUpload, onEdit, onDelete, 
           <User className="w-4 h-4 text-emerald-600" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-gray-900 truncate">{apt.name}</p>
-          {apt.email && <p className="text-[11px] text-gray-400 truncate flex items-center gap-1"><Mail className="w-3 h-3 shrink-0" />{apt.email}</p>}
+          <p className="text-sm font-bold text-gray-900 truncate">
+            {apt.users?.name || apt.name || 'Patient'}
+          </p>
+          {(apt.users?.email || apt.email) && (
+            <p className="text-[11px] text-gray-400 truncate flex items-center gap-1">
+              <Mail className="w-3 h-3 shrink-0" />
+              {apt.users?.email || apt.email}
+            </p>
+          )}
         </div>
       </div>
 
@@ -129,9 +136,9 @@ function AppointmentCard({ apt, highlight, reports, onUpload, onEdit, onDelete, 
             </span>
           )}
         </div>
-        {apt.phone && (
+        {(apt.users?.phone || apt.phone) && (
           <div className="flex items-center gap-2 text-xs text-gray-400">
-            <Phone className="w-3.5 h-3.5 shrink-0" />{apt.phone}
+            <Phone className="w-3.5 h-3.5 shrink-0" />{apt.users?.phone || apt.phone}
           </div>
         )}
       </div>
@@ -268,27 +275,14 @@ export default function DoctorDashboard() {
   const handleStatusChange = async (aptId, newStatus) => {
     const prevAppointments = [...appointments];
     const appointment = appointments.find(a => a.id === aptId);
-    const API = import.meta.env.VITE_API_URL;
-    console.log("API:", API);
-
     // Optimistic update
     setAppointments(prev => prev.map(a => a.id === aptId ? { ...a, status: newStatus } : a));
-    try {
-      const res = await fetch(`${API}/api/appointment/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          appointmentId: aptId,
-          status: newStatus.toLowerCase(),
-          patientEmail: appointment?.email || '',
-        }),
-      });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to update status');
+    try {
+      await authFetch(`/appointments/${aptId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus }),
+      });
 
       setSuccessMsg(`Status updated to ${newStatus}`);
       setTimeout(() => setSuccessMsg(''), 3000);
@@ -330,7 +324,27 @@ export default function DoctorDashboard() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <Logo />
-          <div className="flex items-center gap-3">
+
+          {/* Navigation Links */}
+          <div className="hidden lg:flex items-center gap-6">
+            {[
+              { name: 'Home', path: '/' },
+              { name: 'About', path: '/about' },
+              { name: 'Services', path: '/services' },
+              { name: 'Doctors', path: '/doctors' },
+              { name: 'Gallery', path: '/gallery' },
+            ].map((link) => (
+              <Link
+                key={link.name}
+                to={link.path}
+                className="text-sm font-medium text-gray-500 hover:text-primary transition-colors"
+              >
+                {link.name}
+              </Link>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-4">
             {/* Notification bell */}
             {notifications.length > 0 && (
               <div className="relative">
@@ -529,8 +543,14 @@ export default function DoctorDashboard() {
                                     <User className="w-4 h-4 text-emerald-600" />
                                   </div>
                                   <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-gray-900 truncate">{apt.name}</p>
-                                    {apt.email && <p className="text-[11px] text-gray-400 truncate">{apt.email}</p>}
+                                    <p className="text-sm font-semibold text-gray-900 truncate">
+                                      {apt.users?.name || apt.name || 'N/A'}
+                                    </p>
+                                    {(apt.users?.email || apt.email) && (
+                                      <p className="text-[11px] text-gray-400 truncate">
+                                        {apt.users?.email || apt.email}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
                               </td>

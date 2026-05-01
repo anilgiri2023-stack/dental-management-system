@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sparkles, ArrowRight, ShieldCheck, ArrowLeft, Loader2, Stethoscope, EyeOff, Eye } from 'lucide-react';
 import Logo from '../components/Logo';
-import { apiFetch } from '../utils/api';
+import { supabase } from '../utils/supabase';
 
 export default function DoctorLoginPage() {
   const [email, setEmail] = useState('');
@@ -32,8 +32,11 @@ export default function DoctorLoginPage() {
     setLoading(true);
 
     try {
-      await doctorLogin(email, password);
-      navigate('/doctor');
+      localStorage.clear(); // Clear any old sessions
+      const data = await doctorLogin(email, password);
+      console.log('✅ Doctor logged in:', data?.user);
+      setSuccessMsg('Login successful! Redirecting...');
+      setTimeout(() => navigate('/doctor'), 1500);
     } catch (err) {
       setError(err.message || 'Invalid doctor credentials');
     } finally {
@@ -53,22 +56,20 @@ export default function DoctorLoginPage() {
     setLoading(true);
 
     try {
-      const data = await apiFetch('/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'http://localhost:5173/update-password',
       });
 
-      if (!data.success) {
-        console.error('EMAIL FAILED');
-        const msg = data.message || 'Failed to send reset link';
-        if (msg.toLowerCase().includes('rate limit')) {
+      if (error) {
+        console.error('SUPABASE RESET FAILED:', error);
+        if (error.message.toLowerCase().includes('rate limit')) {
           setError('Too many requests. Please wait a while before trying again.');
         } else {
-          setError(msg);
+          setError(error.message);
         }
       } else {
-        console.log('EMAIL SENT SUCCESS');
-        setSuccessMsg(data.message || 'Check your inbox or spam folder');
+        console.log('RESET EMAIL SENT SUCCESS');
+        setSuccessMsg('Check your inbox or spam folder for the reset link.');
         
         // Start 60s countdown
         setCooldown(60);
@@ -84,12 +85,7 @@ export default function DoctorLoginPage() {
       }
     } catch (err) {
       console.error('EMAIL FAILED', err);
-      const msg = err.message || 'Failed to send reset link.';
-      if (msg.toLowerCase().includes('rate limit')) {
-        setError('Too many requests. Please wait a while before trying again.');
-      } else {
-        setError(msg);
-      }
+      setError(err.message || 'Failed to send reset link.');
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FileText, X, Loader2, Upload } from 'lucide-react';
-import { uploadFetch, apiFetch } from '../utils/api';
+import { uploadFetch, apiFetch } from '../api';
 
 // ─── Validation constants ───
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB

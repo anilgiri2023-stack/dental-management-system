@@ -55,7 +55,7 @@ export default function BookingPage() {
       try {
         setDoctorsLoading(true);
         console.log('Fetching doctors from backend API...');
-        const res = await authFetch('/doctors');
+        const res = await authFetch('/doctor');
         console.log('Doctors from backend API:', res);
         
         if (res.success && res.doctors) {
@@ -131,28 +131,38 @@ export default function BookingPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    // Step 1 & 2 Debug: Verify Doctor
+    const selectedDoctor = doctors.find(d => d.id === selectedDoctorId);
+    console.log("Selected Doctor Object:", selectedDoctor);
+
+    if (!selectedDoctor || !selectedDoctor.id) {
+      setError('Please select a doctor');
+      return;
+    }
     if (!formData.service) { setError('Please select a service'); return; }
-    if (!selectedDoctorId) { setError('Please select a doctor'); return; }
     if (!formData.date) { setError('Please select a date'); return; }
     if (!formData.time) { setError('Please select a time slot'); return; }
 
     setLoading(true);
     try {
       const payload = {
-        name: user?.name || 'Patient',
-        email: user?.email || '',
-        phone: user?.phone || '',
+        user_id: user.id,
+        email: user.email,
+        name: user.name,
         service: formData.service,
         date: formData.date,
         time: formData.time,
         notes: formData.notes,
-        doctor_id: selectedDoctorId,
+        doctor_id: selectedDoctor.id, // MUST BE ID
       };
-      console.log('Booking payload:', payload);
+      
+      console.log("BOOKING PAYLOAD:", payload);
+
       await authFetch('/appointments', { method: 'POST', body: JSON.stringify(payload) });
       setSubmitted(true);
     } catch (err) {
-      console.error('Booking error:', err);
+      console.error("Booking error:", err);
       setError(err.message || 'Failed to book appointment.');
     } finally {
       setLoading(false);
@@ -191,7 +201,7 @@ export default function BookingPage() {
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
-            <Link to="/dashboard" className="flex-1 inline-flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark transition-all">View Dashboard</Link>
+            <Link to="/appointments" className="flex-1 inline-flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-semibold hover:bg-primary-dark transition-all">View Dashboard</Link>
             <button type="button" onClick={() => { setSubmitted(false); setFormData({ date:'', time:'', service:'', notes:'' }); setSelectedDoctorId(''); setBookedSlots([]); }} className="flex-1 inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all">Book Another</button>
           </div>
         </div>
@@ -205,7 +215,7 @@ export default function BookingPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <Link to="/dashboard" className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary transition-colors">
+          <Link to="/appointments" className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary transition-colors">
             <ArrowLeft className="w-4 h-4" /> Dashboard
           </Link>
           <div className="hidden sm:block">
