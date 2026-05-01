@@ -25,35 +25,68 @@ export const sendStatusEmail = async (appointment, status) => {
       to: appointment.email,
       subject: `Appointment Status Update: ${status}`,
       html: `
-        <div style="font-family: Arial, sans-serif; background:#f4f7fb; padding:20px;">
-          <div style="max-width:600px; margin:auto; background:white; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.08);">
-            <div style="background:linear-gradient(135deg,#0ea5e9,#22c55e); padding:20px; color:white;">
-              <h2 style="margin:0;">Clinical Serenity</h2>
-              <p style="margin:5px 0 0; font-size:14px;">Appointment Status Update</p>
-            </div>
-            <div style="padding:25px;">
-              <h3 style="margin-top:0; color:#111;">
-                Your appointment has been 
-                <span style="color:${status === "Approved" || status === "approved" ? "#16a34a" : "#dc2626"};">
-                  ${status}
-                </span>
-              </h3>
-              <div style="margin-top:20px; border:1px solid #e5e7eb; border-radius:10px; padding:15px; background:#fafafa;">
-                <p><strong>Doctor:</strong> Dr. ${doctorName}</p>
-                <p><strong>Service:</strong> ${appointment.service}</p>
-                <p><strong>Date:</strong> ${appointment.date}</p>
-                <p><strong>Time:</strong> ${appointment.time}</p>
-              </div>
-              <div style="margin-top:25px; text-align:center;">
-                <a href="http://localhost:5173/appointments" style="background:#0ea5e9; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:bold;">
-                  View Appointment
-                </a>
-              </div>
-              <p style="margin-top:25px; font-size:13px; color:#6b7280;">
-                If you have any questions, feel free to contact us.
-              </p>
-            </div>
-          </div>
+        <div style="background-color: #f4f7f6; padding: 40px 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; margin: 0;">
+          <table align="center" border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid #eef2f1;">
+            <!-- Header -->
+            <tr>
+              <td style="background: linear-gradient(135deg, ${status.toLowerCase() === "approved" ? "#2e7d6b 0%, #3d9e8b 100%" : "#b91c1c 0%, #dc2626 100%"}); padding: 40px; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Clinical Serenity</h1>
+                <p style="color: #d1e9e4; margin: 10px 0 0 0; font-size: 16px;">Appointment Update</p>
+              </td>
+            </tr>
+            
+            <!-- Body -->
+            <tr>
+              <td style="padding: 40px;">
+                <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 700; color: #1a1a1a;">Status Update</h2>
+                <p style="margin: 0 0 30px 0; font-size: 16px; line-height: 1.6; color: #555;">
+                  Your appointment has been 
+                  <span style="color: ${status.toLowerCase() === "approved" ? "#2e7d6b" : "#dc2626"}; font-weight: 700;">${status}</span>.
+                </p>
+                
+                <!-- Details Box -->
+                <div style="background-color: #f9fcfb; border: 1px solid #e2ece9; border-radius: 12px; padding: 25px; margin-bottom: 30px;">
+                  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="padding-bottom: 15px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #8e9a97; text-transform: uppercase; letter-spacing: 1px;">Doctor</span>
+                        <div style="font-size: 16px; font-weight: 600; color: #1a1a1a; margin-top: 4px;">Dr. ${doctorName}</div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-bottom: 15px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #8e9a97; text-transform: uppercase; letter-spacing: 1px;">Service</span>
+                        <div style="font-size: 16px; font-weight: 600; color: #2e7d6b; margin-top: 4px;">${appointment.service}</div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <span style="font-size: 11px; font-weight: 700; color: #8e9a97; text-transform: uppercase; letter-spacing: 1px;">Date & Time</span>
+                        <div style="font-size: 16px; font-weight: 600; color: #1a1a1a; margin-top: 4px;">${appointment.date} at ${appointment.time}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+                
+                <!-- CTA -->
+                <div style="text-align: center; margin-bottom: 30px;">
+                  <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/appointments" style="background: linear-gradient(135deg, #2e7d6b 0%, #3d9e8b 100%); color: #ffffff; padding: 16px 32px; text-decoration: none; border-radius: 30px; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 15px rgba(46, 125, 107, 0.2);">View Details</a>
+                </div>
+                
+                <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #777; text-align: center;">If you have any questions, please reach out to us at support@clinicalserenity.com</p>
+              </td>
+            </tr>
+            
+            <!-- Footer -->
+            <tr>
+              <td style="padding: 0 40px 40px 40px; text-align: center;">
+                <div style="border-top: 1px solid #eee; padding-top: 30px;">
+                  <p style="margin: 0; font-size: 14px; font-weight: 700; color: #2e7d6b;">Clinical Serenity</p>
+                  <p style="margin: 15px 0 0 0; font-size: 12px; color: #aaa;">Modern Dental Care Excellence</p>
+                </div>
+              </td>
+            </tr>
+          </table>
         </div>
       `
     });
