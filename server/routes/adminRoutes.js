@@ -9,6 +9,9 @@ import { getAllAppointments } from '../controllers/adminController.js';
 
 const router = express.Router();
 
+// Temporarily public for testing
+router.get('/appointments', getAllAppointments);
+
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
 
 // ─── ADMIN LOGIN (Custom Implementation) ───
@@ -367,6 +370,5 @@ router.post('/delete-multiple-users', async (req, res) => {
   }
 });
 
-router.get('/appointments', getAllAppointments);
 
 export default router;
