@@ -72,7 +72,7 @@ export default function AdminDashboard() {
   const [updatingId, setUpdatingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
-  
+
   // User delete state
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [deletingUserId, setDeletingUserId] = useState(null);
@@ -195,7 +195,7 @@ export default function AdminDashboard() {
       setInviteName('');
       setInviteEmail('');
       if (activeTab === 'users') fetchUsers();
-      
+
       // Auto-clear success message after 5 seconds
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
@@ -251,9 +251,9 @@ export default function AdminDashboard() {
       setDeletingUserId(userId);
       setError('');
       setSuccessMsg('');
-      
-      const data = await authFetch(`/admin/delete-user/${userId}`, { 
-        method: 'DELETE' 
+
+      const data = await authFetch(`/admin/delete-user/${userId}`, {
+        method: 'DELETE'
       });
 
       if (data.success) {
@@ -283,7 +283,7 @@ export default function AdminDashboard() {
   });
 
   // Selected users that are currently visible in the filtered list
-  const selectedInFilter = selectedUsers.filter(id => 
+  const selectedInFilter = selectedUsers.filter(id =>
     filteredUsers.some(u => u.id === id)
   );
 
@@ -601,54 +601,133 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredAppointments.map((apt) => (
-                        <tr key={apt.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="px-6 py-4">
-                            <strong>{apt.patient_name || apt.email || "N/A"}</strong>
-                            <div className="text-[12px] text-gray-500">{apt.phone || "No phone"}</div>
-                          </td>
+                      {filteredAppointments.map((apt) => {
+                        console.log("RENDERING:", apt);
+                        const statusCfg = STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending;
+                        const StatusIcon = statusCfg.icon;
+                        return (
+                          <tr
+                            key={apt.id}
+                            className="hover:bg-gray-50/50 transition-colors group"
+                          >
+                            {/* Patient info */}
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
+                                  <User className="w-4 h-4 text-primary" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-bold text-gray-900 truncate">
+                                    {apt.patient_name || apt.email || 'N/A'}
+                                  </p>
+                                  <div className="text-[12px] text-gray-500 mt-0.5">
+                                    {apt.phone || "No phone"}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
 
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {apt.doctor_name || "N/A"}
-                          </td>
+                            {/* Doctor */}
+                            <td className="px-6 py-4 hidden sm:table-cell text-sm text-gray-700">
+                              {apt.doctor_name || "N/A"}
+                            </td>
 
-                          <td className="px-6 py-4 text-sm text-gray-600">
-                            {SERVICE_LABELS[apt.service] || apt.service}
-                          </td>
+                            {/* Service */}
+                            <td className="px-6 py-4 hidden md:table-cell">
+                              <span className="text-sm text-gray-600">
+                                {SERVICE_LABELS[apt.service] || apt.service}
+                              </span>
 
-                          <td className="px-6 py-4 text-sm text-gray-600">
-                            {new Date(apt.date).toLocaleDateString()} {apt.time}
-                          </td>
+                            </td>
 
-                          <td className="px-6 py-4">
-                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
-                              apt.status === "Approved" ? "bg-emerald-50 text-emerald-600" : 
-                              apt.status === "Rejected" ? "bg-red-50 text-red-600" : 
-                              "bg-amber-50 text-amber-600"
-                            }`}>
-                              {apt.status}
-                            </span>
-                          </td>
-                          
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => handleDelete(apt.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
-                          </td>
-                        </tr>
-                      ))}
+                            {/* Date & Time */}
+                            <td className="px-6 py-4 hidden lg:table-cell">
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Calendar className="w-4 h-4 text-gray-400" />
+                                {new Date(apt.date).toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
+                              </div>
+                              {apt.time && (
+                                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                                  <Clock className="w-3 h-3" />
+                                  {apt.time}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Status */}
+                            <td className="px-6 py-4">
+                              <div className="relative inline-block">
+                                <select
+                                  value={apt.status}
+                                  onChange={(e) =>
+                                    handleStatusChange(apt.id, e.target.value)
+                                  }
+                                  disabled={updatingId === apt.id}
+                                  className={`appearance-none pl-7 pr-8 py-1.5 rounded-full text-xs font-semibold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${statusCfg.color} ${updatingId === apt.id ? 'opacity-50' : ''
+                                    }`}
+                                >
+                                  <option value="Pending">Pending</option>
+                                  <option value="Approved">Approved</option>
+                                  <option value="Rejected">Rejected</option>
+                                </select>
+                                {updatingId === apt.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none animate-spin" />
+                                ) : (
+                                  <StatusIcon className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                )}
+                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
+                              </div>
+                            </td>
+
+                            {/* Actions */}
+                            <td className="px-6 py-4 text-right">
+                              {showDeleteConfirm === apt.id ? (
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    onClick={() => handleDelete(apt.id)}
+                                    disabled={deletingId === apt.id}
+                                    className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                                  >
+                                    {deletingId === apt.id ? 'Deleting...' : 'Confirm'}
+                                  </button>
+                                  <button
+                                    onClick={() => setShowDeleteConfirm(null)}
+                                    className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setShowDeleteConfirm(apt.id)}
+                                  className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                                  title="Delete appointment"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
-            
-            {/* Upcoming Appointments List with Doctor */}
+
             {(() => {
               const parseDateTime = (dateStr, timeStr) => {
                 if (!dateStr || !timeStr) return new Date();
                 const [year, month, day] = dateStr.split("-");
                 let [timePart, ampm] = timeStr.split(" ");
                 if (!timePart) return new Date(year, month - 1, day);
-                
+
                 let [hour, minute] = timePart.split(":");
                 hour = parseInt(hour);
                 if (ampm === "PM" && hour !== 12) hour += 12;
@@ -659,14 +738,16 @@ export default function AdminDashboard() {
 
               const now = new Date();
               const upcomingList = appointments
-                .filter(a => {
+                .filter((a) => {
                   if (!a.time) return false;
                   const dt = parseDateTime(a.date, a.time);
                   return dt > now;
                 })
-                .sort((a, b) => parseDateTime(a.date, a.time) - parseDateTime(b.date, b.time));
-
-              console.log("UPCOMING:", upcomingList);
+                .sort(
+                  (a, b) =>
+                    parseDateTime(a.date, a.time) -
+                    parseDateTime(b.date, b.time)
+                );
 
               if (upcomingList.length === 0) return null;
 
@@ -674,46 +755,60 @@ export default function AdminDashboard() {
                 <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-gray-100 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-primary" />
-                    <h3 className="text-lg font-bold text-gray-900">Upcoming Appointments with Doctor</h3>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Upcoming Appointments with Doctor
+                    </h3>
                   </div>
+
                   <div className="divide-y divide-gray-50">
-                    {upcomingList.map((apt) => {
-                      console.log("RENDERING:", apt);
-                      return (
-                        <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors">
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor_name || "N/A"}</span>
-                              <span className="text-gray-300">•</span>
-                              <div className="relative inline-block">
-                                <select
-                                  value={apt.status}
-                                  onChange={(e) => handleStatusChange(apt.id, e.target.value)}
-                                  disabled={updatingId === apt.id}
-                                  className={`appearance-none pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
-                                    apt.status === "Approved" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
-                                    apt.status === "Rejected" ? "bg-red-50 text-red-600 border-red-100" : 
-                                    "bg-amber-50 text-amber-600 border-amber-100"
-                                  } ${updatingId === apt.id ? 'opacity-50' : ''}`}
-                                >
-                                  <option value="Pending">Pending</option>
-                                  <option value="Approved">Approved</option>
-                                  <option value="Rejected">Rejected</option>
-                                </select>
-                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
-                              </div>
-                            </div>
-                            <div className="flex flex-col text-xs text-gray-500">
-                              <p><b>Patient:</b> {apt.patient_name || apt.email || "N/A"}</p>
-                              <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
-                                <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "No phone"}</span>
+                    {upcomingList.map((apt) => (
+                      <div
+                        key={`upcoming-${apt.id}`}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors"
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-gray-900">
+                              Dr. {apt.doctor_name || "N/A"}
+                            </span>
+
+                            <span className="text-gray-300">•</span>
+
+                            <div className="relative inline-block">
+                              <select
+                                value={apt.status}
+                                onChange={(e) =>
+                                  handleStatusChange(apt.id, e.target.value)
+                                }
+                                disabled={updatingId === apt.id}
+                                className="pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border"
+                              >
+                                <option value="Pending">Pending</option>
+                                <option value="Approved">Approved</option>
+                                <option value="Rejected">Rejected</option>
+                              </select>
                             </div>
                           </div>
+
+                          <div className="flex flex-col text-xs text-gray-500">
+                            <p>
+                              <b>Patient:</b>{" "}
+                              {apt.patient_name || apt.email || "N/A"}
+                            </p>
+
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3" />
+                              {apt.phone || "No phone"}
+                            </span>
+                          </div>
+                        </div>
+
                         <div className="text-right shrink-0">
                           <div className="text-sm font-semibold text-primary flex items-center justify-end gap-1.5">
                             <Calendar className="w-4 h-4" />
-                            {new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {new Date(apt.date).toLocaleDateString()}
                           </div>
+
                           {apt.time && (
                             <div className="text-xs text-gray-400 mt-1 flex items-center justify-end gap-1.5">
                               <Clock className="w-3.5 h-3.5" />
@@ -722,8 +817,7 @@ export default function AdminDashboard() {
                           )}
                         </div>
                       </div>
-                    );
-                  })}
+                    ))}
                   </div>
                 </div>
               );
@@ -732,484 +826,479 @@ export default function AdminDashboard() {
         ) : activeTab === 'users' ? (
           /* ═══ USERS TAB ═══ */
           <>
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Users className="w-5 h-5 text-primary" />
-                All Users
-                <span className="text-sm font-normal text-gray-400">({filteredUsers.length})</span>
-              </h2>
-              <div className="flex items-center gap-4">
-                {selectedInFilter.length > 0 && (
+              <div className="flex items-center justify-between gap-4 mb-6">
+                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  All Users
+                  <span className="text-sm font-normal text-gray-400">({filteredUsers.length})</span>
+                </h2>
+                <div className="flex items-center gap-4">
+                  {selectedInFilter.length > 0 && (
+                    <button
+                      onClick={() => setShowBulkDeleteConfirm(true)}
+                      className="inline-flex items-center gap-2 bg-red-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-200 animate-fade-in-up"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete ({selectedInFilter.length})
+                    </button>
+                  )}
                   <button
-                    onClick={() => setShowBulkDeleteConfirm(true)}
-                    className="inline-flex items-center gap-2 bg-red-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-red-700 transition-colors shadow-lg shadow-red-200 animate-fade-in-up"
+                    onClick={() => { setInviteRole('admin'); setShowInviteModal(true); }}
+                    className="inline-flex items-center gap-2 bg-slate-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-slate-900 transition-colors"
                   >
-                    <Trash2 className="w-4 h-4" />
-                    Delete ({selectedInFilter.length})
-                  </button>
-                )}
-                <button
-                  onClick={() => { setInviteRole('admin'); setShowInviteModal(true); }}
-                  className="inline-flex items-center gap-2 bg-slate-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-slate-900 transition-colors"
-                >
-                  <Mail className="w-4 h-4" />
-                  Invite Admin
-                </button>
-                <button
-                  onClick={() => { setInviteRole('doctor'); setShowInviteModal(true); }}
-                  className="inline-flex items-center gap-2 bg-primary text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-primary-dark transition-colors"
-                >
-                  <Mail className="w-4 h-4" />
-                  Invite Doctor
-                </button>
-                <div className="flex bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setUserRoleFilter('patient')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      userRoleFilter === 'patient'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    Patients
+                    <Mail className="w-4 h-4" />
+                    Invite Admin
                   </button>
                   <button
-                    onClick={() => setUserRoleFilter('doctor')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      userRoleFilter === 'doctor'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                    onClick={() => { setInviteRole('doctor'); setShowInviteModal(true); }}
+                    className="inline-flex items-center gap-2 bg-primary text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-primary-dark transition-colors"
                   >
-                    Doctors
+                    <Mail className="w-4 h-4" />
+                    Invite Doctor
                   </button>
+                  <div className="flex bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setUserRoleFilter('patient')}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${userRoleFilter === 'patient'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                      Patients
+                    </button>
+                    <button
+                      onClick={() => setUserRoleFilter('doctor')}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${userRoleFilter === 'doctor'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                      Doctors
+                    </button>
+                    <button
+                      onClick={() => setUserRoleFilter('admin')}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${userRoleFilter === 'admin'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                      Admins
+                    </button>
+                  </div>
                   <button
-                    onClick={() => setUserRoleFilter('admin')}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      userRoleFilter === 'admin'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                    onClick={fetchUsers}
+                    className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
-                    Admins
+                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    Refresh
                   </button>
                 </div>
-                <button
-                  onClick={fetchUsers}
-                  className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
               </div>
-            </div>
 
-            {/* Success Message */}
-            {successMsg && (
-              <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm font-medium animate-fade-in-up flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                {successMsg}
-                <button onClick={() => setSuccessMsg('')} className="ml-auto text-green-400 hover:text-green-600">✕</button>
-              </div>
-            )}
-
-            {/* Error */}
-            {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">
-                {error}
-                <button onClick={() => setError('')} className="ml-4 text-red-400 hover:text-red-600">✕</button>
-              </div>
-            )}
-
-            {loading ? (
-              <div className="flex flex-col items-center justify-center py-20">
-                <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
-                <p className="text-gray-500 text-sm">Loading users...</p>
-              </div>
-            ) : users.length === 0 ? (
-              <div className="text-center py-20">
-                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Users className="w-8 h-8 text-gray-400" />
+              {/* Success Message */}
+              {successMsg && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm font-medium animate-fade-in-up flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  {successMsg}
+                  <button onClick={() => setSuccessMsg('')} className="ml-auto text-green-400 hover:text-green-600">✕</button>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">No Users</h3>
-                <p className="text-sm text-gray-500">No users have signed up yet.</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="px-6 py-4 text-left w-10">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-                            checked={filteredUsers.length > 0 && filteredUsers.every(u => selectedUsers.includes(u.id))}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                // Add only filteredUsers IDs
-                                const newSelected = [...selectedUsers];
-                                filteredUsers.forEach(u => {
-                                  if (!newSelected.includes(u.id)) newSelected.push(u.id);
-                                });
-                                setSelectedUsers(newSelected);
-                              } else {
-                                // Remove only filteredUsers IDs
-                                setSelectedUsers(selectedUsers.filter(id => !filteredUsers.some(u => u.id === id)));
-                              }
-                            }}
-                          />
-                        </th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          User
-                        </th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                          Email
-                        </th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                          Role
-                        </th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          ID
-                        </th>
-                        <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {filteredUsers.map((u) => (
-                        <tr key={u.id} className={`hover:bg-gray-50/50 transition-colors group ${selectedUsers.includes(u.id) ? 'bg-primary-50/30' : ''}`}>
-                          <td className="px-6 py-4">
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium animate-fade-in-up">
+                  {error}
+                  <button onClick={() => setError('')} className="ml-4 text-red-400 hover:text-red-600">✕</button>
+                </div>
+              )}
+
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+                  <p className="text-gray-500 text-sm">Loading users...</p>
+                </div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-20">
+                  <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">No Users</h3>
+                  <p className="text-sm text-gray-500">No users have signed up yet.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="px-6 py-4 text-left w-10">
                             <input
                               type="checkbox"
                               className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-                              checked={selectedUsers.includes(u.id)}
-                              onChange={() => {
-                                setSelectedUsers(prev => 
-                                  prev.includes(u.id) 
-                                    ? prev.filter(id => id !== u.id) 
-                                    : [...prev, u.id]
-                                );
+                              checked={filteredUsers.length > 0 && filteredUsers.every(u => selectedUsers.includes(u.id))}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  // Add only filteredUsers IDs
+                                  const newSelected = [...selectedUsers];
+                                  filteredUsers.forEach(u => {
+                                    if (!newSelected.includes(u.id)) newSelected.push(u.id);
+                                  });
+                                  setSelectedUsers(newSelected);
+                                } else {
+                                  // Remove only filteredUsers IDs
+                                  setSelectedUsers(selectedUsers.filter(id => !filteredUsers.some(u => u.id === id)));
+                                }
                               }}
                             />
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
-                                  {u.role === 'admin' ? <Shield className="w-4 h-4 text-primary" /> : 
-                                   u.role === 'doctor' ? <Stethoscope className="w-4 h-4 text-primary" /> : 
-                                   <User className="w-4 h-4 text-primary" />}
-                                </div>
-                              <span className="text-sm font-semibold text-gray-900">
-                                {u.name || u.email?.split('@')[0] || 'User'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 hidden md:table-cell">
-                            <span className="text-sm text-gray-600 flex items-center gap-1.5">
-                              <Mail className="w-3.5 h-3.5 text-gray-400" />
-                              {u.email || '—'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 hidden sm:table-cell">
-                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                              u.role === 'admin'
-                                ? (u.status === 'invited' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
-                                : u.role === 'doctor'
-                                ? (u.is_active === false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200')
-                                : 'bg-blue-50 text-blue-700 border border-blue-200'
-                            }`}>
-                              {u.role === 'admin' && u.status === 'invited' ? 'invited admin' : 
-                               u.role === 'doctor' && u.is_active === false ? 'invited doctor' : 
-                               (u.role === 'user' ? 'patient' : u.role || 'patient')}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="text-xs text-gray-400 font-mono">
-                              {u.id?.slice(0, 6)}...
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            {showDeleteUserConfirm === u.id ? (
-                              <div className="inline-flex items-center gap-2">
-                                <button
-                                  onClick={() => handleDeleteUser(u.id)}
-                                  disabled={deletingUserId === u.id}
-                                  className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                                >
-                                  {deletingUserId === u.id ? 'Deleting...' : 'Confirm'}
-                                </button>
-                                <button
-                                  onClick={() => setShowDeleteUserConfirm(null)}
-                                  className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setShowDeleteUserConfirm(u.id)}
-                                className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
-                                title="Delete user"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </td>
+                          </th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            User
+                          </th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
+                            Email
+                          </th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                            Role
+                          </th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            ID
+                          </th>
+                          <th className="text-right px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Actions
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {filteredUsers.map((u) => (
+                          <tr key={u.id} className={`hover:bg-gray-50/50 transition-colors group ${selectedUsers.includes(u.id) ? 'bg-primary-50/30' : ''}`}>
+                            <td className="px-6 py-4">
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                checked={selectedUsers.includes(u.id)}
+                                onChange={() => {
+                                  setSelectedUsers(prev =>
+                                    prev.includes(u.id)
+                                      ? prev.filter(id => id !== u.id)
+                                      : [...prev, u.id]
+                                  );
+                                }}
+                              />
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 bg-primary-50 rounded-lg flex items-center justify-center shrink-0">
+                                  {u.role === 'admin' ? <Shield className="w-4 h-4 text-primary" /> :
+                                    u.role === 'doctor' ? <Stethoscope className="w-4 h-4 text-primary" /> :
+                                      <User className="w-4 h-4 text-primary" />}
+                                </div>
+                                <span className="text-sm font-semibold text-gray-900">
+                                  {u.name || u.email?.split('@')[0] || 'User'}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 hidden md:table-cell">
+                              <span className="text-sm text-gray-600 flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-gray-400" />
+                                {u.email || '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 hidden sm:table-cell">
+                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${u.role === 'admin'
+                                  ? (u.status === 'invited' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
+                                  : u.role === 'doctor'
+                                    ? (u.is_active === false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200')
+                                    : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                }`}>
+                                {u.role === 'admin' && u.status === 'invited' ? 'invited admin' :
+                                  u.role === 'doctor' && u.is_active === false ? 'invited doctor' :
+                                    (u.role === 'user' ? 'patient' : u.role || 'patient')}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="text-xs text-gray-400 font-mono">
+                                {u.id?.slice(0, 6)}...
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              {showDeleteUserConfirm === u.id ? (
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    onClick={() => handleDeleteUser(u.id)}
+                                    disabled={deletingUserId === u.id}
+                                    className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                                  >
+                                    {deletingUserId === u.id ? 'Deleting...' : 'Confirm'}
+                                  </button>
+                                  <button
+                                    onClick={() => setShowDeleteUserConfirm(null)}
+                                    className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setShowDeleteUserConfirm(u.id)}
+                                  className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                                  title="Delete user"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
-          </>
-        ) : activeTab === 'analytics' ? (
-          /* ═══ ANALYTICS TAB ═══ */
-          <>
-            {analyticsLoading ? (
-              <div className="flex flex-col items-center justify-center py-20">
-                <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
-                <p className="text-gray-500 text-sm">Loading analytics...</p>
-              </div>
-            ) : analytics ? (
-              <div className="space-y-8">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  {[
-                    { label: 'Total Patients', value: analytics.totalPatients, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-                    { label: 'Total Doctors', value: analytics.totalDoctors, icon: Stethoscope, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                    { label: 'Total Appointments', value: analytics.totalAppointments, icon: Calendar, color: 'text-primary', bg: 'bg-primary-50' },
-                    { label: 'Approved', value: analytics.statusBreakdown?.Approved || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-                  ].map((stat) => (
-                    <div key={stat.label} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className={`w-10 h-10 ${stat.bg} rounded-xl flex items-center justify-center`}>
-                          <stat.icon className={`w-5 h-5 ${stat.color}`} />
+              )}
+            </>
+            ) : activeTab === 'analytics' ? (
+            /* ═══ ANALYTICS TAB ═══ */
+            <>
+              {analyticsLoading ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+                  <p className="text-gray-500 text-sm">Loading analytics...</p>
+                </div>
+              ) : analytics ? (
+                <div className="space-y-8">
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      { label: 'Total Patients', value: analytics.totalPatients, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { label: 'Total Doctors', value: analytics.totalDoctors, icon: Stethoscope, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                      { label: 'Total Appointments', value: analytics.totalAppointments, icon: Calendar, color: 'text-primary', bg: 'bg-primary-50' },
+                      { label: 'Approved', value: analytics.statusBreakdown?.Approved || 0, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
+                    ].map((stat) => (
+                      <div key={stat.label} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className={`w-10 h-10 ${stat.bg} rounded-xl flex items-center justify-center`}>
+                            <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                          </div>
                         </div>
+                        <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                        <p className="text-xs text-gray-500 mt-1">{stat.label}</p>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                      <p className="text-xs text-gray-500 mt-1">{stat.label}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Monthly Bookings Chart */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-primary" /> Monthly Bookings
-                  </h3>
-                  <div className="flex items-end gap-2 h-48">
-                    {Object.entries(analytics.monthlyBookings || {}).map(([month, count]) => {
-                      const maxVal = Math.max(...Object.values(analytics.monthlyBookings || {}), 1);
-                      const height = Math.max((count / maxVal) * 100, 4);
-                      return (
-                        <div key={month} className="flex-1 flex flex-col items-center gap-1">
-                          <span className="text-xs font-semibold text-gray-700">{count}</span>
-                          <div className="w-full bg-primary/80 rounded-t-lg transition-all hover:bg-primary" style={{ height: `${height}%` }} />
-                          <span className="text-[10px] text-gray-400">{month.slice(5)}</span>
-                        </div>
-                      );
-                    })}
+                    ))}
                   </div>
-                </div>
 
-                {/* Popular Services + Status */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Monthly Bookings Chart */}
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
                     <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 text-primary" /> Popular Services
+                      <TrendingUp className="w-5 h-5 text-primary" /> Monthly Bookings
                     </h3>
-                    <div className="space-y-3">
-                      {(analytics.popularServices || []).map((s, i) => {
-                        const maxC = analytics.popularServices[0]?.count || 1;
+                    <div className="flex items-end gap-2 h-48">
+                      {Object.entries(analytics.monthlyBookings || {}).map(([month, count]) => {
+                        const maxVal = Math.max(...Object.values(analytics.monthlyBookings || {}), 1);
+                        const height = Math.max((count / maxVal) * 100, 4);
                         return (
-                          <div key={s.service} className="flex items-center gap-3">
-                            <span className="text-xs font-mono text-gray-400 w-4">{i + 1}</span>
-                            <div className="flex-1">
+                          <div key={month} className="flex-1 flex flex-col items-center gap-1">
+                            <span className="text-xs font-semibold text-gray-700">{count}</span>
+                            <div className="w-full bg-primary/80 rounded-t-lg transition-all hover:bg-primary" style={{ height: `${height}%` }} />
+                            <span className="text-[10px] text-gray-400">{month.slice(5)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Popular Services + Status */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <BarChart3 className="w-5 h-5 text-primary" /> Popular Services
+                      </h3>
+                      <div className="space-y-3">
+                        {(analytics.popularServices || []).map((s, i) => {
+                          const maxC = analytics.popularServices[0]?.count || 1;
+                          return (
+                            <div key={s.service} className="flex items-center gap-3">
+                              <span className="text-xs font-mono text-gray-400 w-4">{i + 1}</span>
+                              <div className="flex-1">
+                                <div className="flex justify-between mb-1">
+                                  <span className="text-sm font-medium text-gray-700 capitalize">{s.service}</span>
+                                  <span className="text-sm font-bold text-gray-900">{s.count}</span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(s.count / maxC) * 100}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(analytics.popularServices || []).length === 0 && (
+                          <p className="text-sm text-gray-400">No data yet</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-primary" /> Status Breakdown
+                      </h3>
+                      <div className="space-y-4">
+                        {Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => {
+                          const colors = { Pending: 'bg-amber-400', Approved: 'bg-emerald-400', Rejected: 'bg-red-400' };
+                          const total = analytics.totalAppointments || 1;
+                          return (
+                            <div key={status}>
                               <div className="flex justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700 capitalize">{s.service}</span>
-                                <span className="text-sm font-bold text-gray-900">{s.count}</span>
+                                <span className="text-sm font-medium text-gray-700">{status}</span>
+                                <span className="text-sm font-bold text-gray-900">{count} ({Math.round((count / total) * 100)}%)</span>
                               </div>
-                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(s.count / maxC) * 100}%` }} />
+                              <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full ${colors[status] || 'bg-gray-400'} rounded-full`} style={{ width: `${(count / total) * 100}%` }} />
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                      {(analytics.popularServices || []).length === 0 && (
-                        <p className="text-sm text-gray-400">No data yet</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-primary" /> Status Breakdown
-                    </h3>
-                    <div className="space-y-4">
-                      {Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => {
-                        const colors = { Pending: 'bg-amber-400', Approved: 'bg-emerald-400', Rejected: 'bg-red-400' };
-                        const total = analytics.totalAppointments || 1;
-                        return (
-                          <div key={status}>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-sm font-medium text-gray-700">{status}</span>
-                              <span className="text-sm font-bold text-gray-900">{count} ({Math.round((count / total) * 100)}%)</span>
-                            </div>
-                            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                              <div className={`h-full ${colors[status] || 'bg-gray-400'} rounded-full`} style={{ width: `${(count / total) * 100}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className="text-center py-20">
-                <p className="text-gray-500">No analytics data available</p>
-              </div>
-            )}
-          </>
+              ) : (
+                <div className="text-center py-20">
+                  <p className="text-gray-500">No analytics data available</p>
+                </div>
+              )}
+            </>
         ) : null}
 
 
-        {/* Invite Modal */}
-        {showInviteModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  <Mail className="w-5 h-5 text-primary" />
-                  Invite {inviteRole === 'admin' ? 'Admin' : 'Doctor'}
-                </h3>
-                <button
-                  onClick={() => setShowInviteModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <form onSubmit={handleInvite} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {inviteRole === 'admin' ? 'Admin\'s Name' : 'Doctor\'s Name'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={inviteName}
-                    onChange={(e) => setInviteName(e.target.value)}
-                    placeholder={inviteRole === 'admin' ? 'e.g. John Doe' : 'e.g. Dr. Sarah Jenkins'}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
-                  />
+            {/* Invite Modal */}
+            {showInviteModal && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+                  <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                      <Mail className="w-5 h-5 text-primary" />
+                      Invite {inviteRole === 'admin' ? 'Admin' : 'Doctor'}
+                    </h3>
+                    <button
+                      onClick={() => setShowInviteModal(false)}
+                      className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <form onSubmit={handleInvite} className="p-6 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        {inviteRole === 'admin' ? 'Admin\'s Name' : 'Doctor\'s Name'}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={inviteName}
+                        onChange={(e) => setInviteName(e.target.value)}
+                        placeholder={inviteRole === 'admin' ? 'e.g. John Doe' : 'e.g. Dr. Sarah Jenkins'}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="sarah@example.com"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
+                      />
+                    </div>
+                    <div className="pt-4 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowInviteModal(false)}
+                        className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={inviting}
+                        className={`flex-1 py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${inviting ? 'opacity-70 cursor-not-allowed' : ''
+                          }`}
+                      >
+                        {inviting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Inviting...
+                          </>
+                        ) : (
+                          'Send Invite'
+                        )}
+                      </button>
+                    </div>
+                  </form>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="sarah@example.com"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none transition-all"
-                  />
-                </div>
-                <div className="pt-4 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowInviteModal(false)}
-                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={inviting}
-                    className={`flex-1 py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${
-                      inviting ? 'opacity-70 cursor-not-allowed' : ''
-                    }`}
-                  >
-                    {inviting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Inviting...
-                      </>
-                    ) : (
-                      'Send Invite'
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-        {/* Bulk Delete User Confirmation */}
-        {showBulkDeleteConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertCircle className="w-6 h-6 text-red-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Multiple Users?</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                Are you sure you want to delete {selectedInFilter.length} selected users? This will permanently remove their accounts and data. This action cannot be undone.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowBulkDeleteConfirm(false)}
-                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleDeleteSelectedUsers}
-                  disabled={deletingSelected}
-                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  {deletingSelected ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete All'}
-                </button>
+            )}
+            {/* Bulk Delete User Confirmation */}
+            {showBulkDeleteConfirm && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+                <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                    <AlertCircle className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">Delete Multiple Users?</h3>
+                  <p className="text-gray-500 text-sm mb-6">
+                    Are you sure you want to delete {selectedInFilter.length} selected users? This will permanently remove their accounts and data. This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowBulkDeleteConfirm(false)}
+                      className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteSelectedUsers}
+                      disabled={deletingSelected}
+                      className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {deletingSelected ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete All'}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Delete User Confirmation */}
-        {showDeleteUserConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
-                <AlertCircle className="w-6 h-6 text-red-600" />
+            {/* Delete User Confirmation */}
+            {showDeleteUserConfirm && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+                <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                    <AlertCircle className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">Delete User Account?</h3>
+                  <p className="text-gray-500 text-sm mb-6">
+                    Are you sure you want to delete this user? This will permanently remove their account and all associated data. This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowDeleteUserConfirm(null)}
+                      className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleDeleteUser(showDeleteUserConfirm)}
+                      disabled={deletingUserId === showDeleteUserConfirm}
+                      className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {deletingUserId === showDeleteUserConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete User'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Delete User Account?</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                Are you sure you want to delete this user? This will permanently remove their account and all associated data. This action cannot be undone.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteUserConfirm(null)}
-                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleDeleteUser(showDeleteUserConfirm)}
-                  disabled={deletingUserId === showDeleteUserConfirm}
-                  className="flex-1 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  {deletingUserId === showDeleteUserConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Yes, Delete User'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
+            )}
+          </main>
     </div>
   );
 }
