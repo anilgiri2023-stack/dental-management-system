@@ -38,13 +38,18 @@ router.get('/', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   console.log("==== NEW APPOINTMENT REQUEST ====");
   console.log("REQ BODY:", req.body);
   console.log("HEADERS:", req.headers);
 
   const { name, email, phone, service, date, time, doctor_id } = req.body;
   const patient_name = req.body.patient_name || name;
+  const user_id = req.user?.id;
+
+  if (!user_id) {
+    return res.status(401).json({ success: false, error: "User not authenticated" });
+  }
 
   // Validation
   if (!name || !email || !phone || !service || !date || !time || !doctor_id) {
@@ -54,6 +59,7 @@ router.post('/', async (req, res) => {
 
   try {
     const { data, error } = await supabase.from("appointments").insert([{
+      user_id,
       patient_name,
       email,
       phone,
