@@ -48,7 +48,7 @@ export default function UserDashboard() {
 
   const { user, logout, authFetch, updateProfile } = useAuth();
   const navigate = useNavigate();
-  
+
   // Debug check (Step 5)
   useEffect(() => {
     if (user) console.log('👤 Dashboard User Object:', user);
@@ -111,7 +111,7 @@ export default function UserDashboard() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <Logo />
-          
+
           {/* Navigation Links */}
           <div className="hidden lg:flex items-center gap-6">
             {[
@@ -255,7 +255,7 @@ export default function UserDashboard() {
                           <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0"><Stethoscope className="w-5 h-5 text-primary" /></div>
                           <div className="min-w-0">
                             <p className="text-sm font-bold text-gray-900">{SERVICE_LABELS[apt.service] || apt.service}</p>
-                            <p className="text-xs text-gray-400">Dr. {apt.doctor?.name || 'Assigned Doctor'}</p>
+                            <p className="text-xs text-gray-400">Dr. {apt.doctor_name || 'Assigned Doctor'}</p>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-4 text-sm text-gray-600">
