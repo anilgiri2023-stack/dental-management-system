@@ -99,7 +99,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setError('');
     try {
-      const data = await authFetch('/appointments');
+      const data = await authFetch('/admin/appointments');
       setAppointments(data.appointments || []);
     } catch (err) {
       console.error('Fetch appointments error:', err);
@@ -617,19 +617,19 @@ export default function AdminDashboard() {
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-gray-900 truncate">
-                                    {apt.users?.name || apt.name || 'N/A'}
+                                    {apt.patient_name || 'N/A'}
                                   </p>
                                   <div className="flex flex-col gap-0.5 mt-0.5">
-                                    {(apt.users?.email || apt.email) && (
+                                    {apt.email && (
                                       <p className="text-[11px] text-gray-400 truncate flex items-center gap-1">
                                         <Mail className="w-3 h-3 shrink-0" />
-                                        {apt.users?.email || apt.email}
+                                        {apt.email}
                                       </p>
                                     )}
-                                    {(apt.users?.phone || apt.phone) && (
+                                    {apt.phone && (
                                       <p className="text-[11px] text-gray-400 truncate flex items-center gap-1 mt-0.5">
                                         <Phone className="w-3 h-3 shrink-0" />
-                                        {apt.users?.phone || apt.phone}
+                                        {apt.phone}
                                       </p>
                                     )}
                                   </div>
@@ -640,7 +640,7 @@ export default function AdminDashboard() {
                             {/* Doctor */}
                             <td className="px-6 py-4 hidden sm:table-cell">
                               <span className="text-sm font-medium text-gray-700">
-                                {apt.doctor?.name ? `Dr. ${apt.doctor.name}` : 'N/A'}
+                                {apt.doctor_name !== 'N/A' ? `Dr. ${apt.doctor_name}` : 'Assigned Doctor'}
                               </span>
                             </td>
 
@@ -774,7 +774,7 @@ export default function AdminDashboard() {
                       <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor?.name || "N/A"}</span>
+                            <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor_name || "N/A"}</span>
                             <span className="text-gray-300">•</span>
                             <div className="relative inline-block">
                               <select
@@ -795,10 +795,10 @@ export default function AdminDashboard() {
                             </div>
                           </div>
                           <div className="flex flex-col text-xs text-gray-500">
-                            <p><b>Patient:</b> {apt.users?.name || apt.name || "N/A"}</p>
+                            <p><b>Patient:</b> {apt.patient_name || "N/A"}</p>
                             <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
-                              <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{apt.users?.email || apt.email || "N/A"}</span>
-                              <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.users?.phone || apt.phone || "N/A"}</span>
+                              <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{apt.email || "N/A"}</span>
+                              <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "N/A"}</span>
                             </div>
                           </div>
                         </div>

@@ -5,6 +5,8 @@ import { supabase } from '../utils/supabase.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { sendEmail } from '../services/emailService.js';
 
+import { getAllAppointments } from '../controllers/adminController.js';
+
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
@@ -364,5 +366,7 @@ router.post('/delete-multiple-users', async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+router.get('/appointments', getAllAppointments);
 
 export default router;
