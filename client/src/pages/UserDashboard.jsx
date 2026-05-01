@@ -21,6 +21,14 @@ const SERVICE_LABELS = {
   extraction: 'Tooth Extraction', pediatric: 'Pediatric Dentistry', other: 'Other',
 };
 
+// Helper Component for Status Icons to avoid IIFEs in JSX
+const StatusIcon = ({ status, className }) => {
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.Pending;
+  const Icon = config.icon;
+  if (!Icon) return null;
+  return <Icon className={className} />;
+};
+
 // Simple Logo inline
 function Logo() {
   return (
@@ -49,7 +57,7 @@ export default function UserDashboard() {
   const { user, logout, authFetch, updateProfile } = useAuth();
   const navigate = useNavigate();
 
-  // Debug check (Step 5)
+  // Debug check
   useEffect(() => {
     if (user) console.log('👤 Dashboard User Object:', user);
   }, [user]);
@@ -94,7 +102,7 @@ export default function UserDashboard() {
     try { await updateProfile({ name: newName.trim(), phone: user.phone }); setEditingName(false); } catch (err) { console.error(err); }
   };
 
-  const filteredAppointments = appointments.filter(a => {
+  const filteredAppointments = (appointments || []).filter(a => {
     if (statusFilter === 'All') return true;
     return a.status === statusFilter;
   });
@@ -244,32 +252,29 @@ export default function UserDashboard() {
             </div>
           ) : (
             <div className="grid gap-4">
-              {filteredAppointments.map((apt) => {
-                const statusCfg = STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending;
-                const StatusIcon = statusCfg.icon;
-                return (
-                  <div key={apt.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6 hover:shadow-md transition-all">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0"><Stethoscope className="w-5 h-5 text-primary" /></div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-gray-900">{SERVICE_LABELS[apt.service] || apt.service}</p>
-                            <p className="text-xs text-gray-400">Dr. {apt.doctor_name || 'Assigned Doctor'}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-                          <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4 text-gray-400" />{new Date(apt.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                          {apt.time && <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-gray-400" />{apt.time}</span>}
+              {filteredAppointments.map((apt) => (
+                <div key={apt.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6 hover:shadow-md transition-all">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0"><Stethoscope className="w-5 h-5 text-primary" /></div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-gray-900">{SERVICE_LABELS[apt.service] || apt.service}</p>
+                          <p className="text-xs text-gray-400">Dr. {apt?.doctor_name || 'N/A'}</p>
                         </div>
                       </div>
-                      <div className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold border ${statusCfg.color} shrink-0`}>
-                        <StatusIcon className="w-3.5 h-3.5" /> {statusCfg.label}
+                      <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                        <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4 text-gray-400" />{new Date(apt.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        {apt.time && <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-gray-400" />{apt.time}</span>}
                       </div>
                     </div>
+                    <div className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold border ${ (STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending).color } shrink-0`}>
+                      <StatusIcon status={apt.status} className="w-3.5 h-3.5" />
+                      {(STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending).label}
+                    </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           )
         )}

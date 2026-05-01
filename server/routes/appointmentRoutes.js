@@ -33,7 +33,14 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const { data, error } = await query.order('date', { ascending: true });
     if (error) throw error;
-    res.json({ success: true, appointments: data });
+
+    // Flatten doctor_name for frontend consistency
+    const formatted = data.map(apt => ({
+      ...apt,
+      doctor_name: apt.doctor?.name || "Assigned Doctor"
+    }));
+
+    res.json({ success: true, appointments: formatted });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -131,7 +138,14 @@ router.get('/my', authMiddleware, async (req, res) => {
     
     const { data, error } = await query.order('date', { ascending: false });
     if (error) throw error;
-    res.json({ success: true, appointments: data });
+
+    // Flatten doctor_name for frontend consistency
+    const formatted = data.map(apt => ({
+      ...apt,
+      doctor_name: apt.doctor?.name || "Assigned Doctor"
+    }));
+
+    res.json({ success: true, appointments: formatted });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

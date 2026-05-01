@@ -17,8 +17,7 @@ export const getAllAppointments = async (req, res) => {
         time,
         status,
         doctor_id,
-        doctor:users!appointments_doctor_id_fkey (
-          id,
+        doctors:users!appointments_doctor_id_fkey (
           name
         )
       `)
@@ -26,7 +25,7 @@ export const getAllAppointments = async (req, res) => {
 
     if (error) throw error;
 
-    // Mapping to requested format
+    // Mapping to requested format with robust fallback for doctor_name
     const formatted = data.map((item) => ({
       id: item.id,
       patient_name: item.patient_name,
@@ -35,7 +34,7 @@ export const getAllAppointments = async (req, res) => {
       date: item.date,
       time: item.time,
       status: item.status,
-      doctor_name: item.doctor?.name || "N/A"
+      doctor_name: (item.doctors?.name) || "N/A"
     }));
 
     res.json({ success: true, appointments: formatted });

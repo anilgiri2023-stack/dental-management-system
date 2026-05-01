@@ -58,6 +58,14 @@ const SERVICE_LABELS = {
   other: 'Other',
 };
 
+// Helper Component for Status Icons to avoid IIFEs in JSX
+const StatusIcon = ({ status, className }) => {
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.Pending;
+  const Icon = config.icon;
+  if (!Icon) return null;
+  return <Icon className={className} />;
+};
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('appointments');
   const [appointments, setAppointments] = useState([]);
@@ -327,6 +335,38 @@ export default function AdminDashboard() {
     approved: appointments.filter((a) => a.status === 'Approved').length,
     rejected: appointments.filter((a) => a.status === 'Rejected').length,
   };
+
+  // --- Helpers for Upcoming Appointments ---
+  const parseDateTime = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return new Date();
+    try {
+      const [year, month, day] = dateStr.split("-");
+      const [timePart, ampm] = (timeStr || "").split(" ");
+      if (!timePart) return new Date(year, month - 1, day);
+
+      let [hour, minute] = timePart.split(":");
+      hour = parseInt(hour);
+      if (ampm === "PM" && hour !== 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+
+      return new Date(year, month - 1, day, hour, minute || 0);
+    } catch (e) {
+      return new Date();
+    }
+  };
+
+  const now = new Date();
+  const upcomingAppointments = (appointments || [])
+    .filter((a) => {
+      if (!a.time || !a.date) return false;
+      const dt = parseDateTime(a.date, a.time);
+      return dt > now;
+    })
+    .sort((a, b) => parseDateTime(a.date, a.time) - parseDateTime(b.date, b.time));
+
+  // Analytics helper values
+  const maxMonthlyCount = Math.max(...Object.values(analytics?.monthlyBookings || {}), 1);
+  const maxPopularServiceCount = (analytics?.popularServices || [])[0]?.count || 1;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -601,179 +641,61 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredAppointments.map((apt) => {
-                        console.log("RENDERING:", apt);
-                        const statusCfg = STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending;
-                        const StatusIcon = statusCfg.icon;
-                        return (
-                          <tr
-                            key={apt.id}
-                            className="hover:bg-gray-50/50 transition-colors group"
-                          >
-                            {/* Patient info */}
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
-                                  <User className="w-4 h-4 text-primary" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-bold text-gray-900 truncate">
-                                    {apt.patient_name || apt.email || 'N/A'}
-                                  </p>
-                                  <div className="text-[12px] text-gray-500 mt-0.5">
-                                    {apt.phone || "No phone"}
-                                  </div>
+                      {filteredAppointments.map((apt) => (
+                        <tr
+                          key={apt.id}
+                          className="hover:bg-gray-50/50 transition-colors group"
+                        >
+                          {/* Patient info */}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-primary-50 rounded-xl flex items-center justify-center shrink-0">
+                                <User className="w-4 h-4 text-primary" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate">
+                                  {apt?.patient_name || apt?.phone || 'Unknown Patient'}
+                                </p>
+                                <div className="text-[12px] text-gray-500 mt-0.5">
+                                  {apt.phone || "No phone"}
                                 </div>
                               </div>
-                            </td>
+                            </div>
+                          </td>
 
-                            {/* Doctor */}
-                            <td className="px-6 py-4 hidden sm:table-cell text-sm text-gray-700">
-                              {apt.doctor_name || "N/A"}
-                            </td>
+                          {/* Doctor */}
+                          <td className="px-6 py-4 hidden sm:table-cell text-sm text-gray-700">
+                            {apt?.doctor_name || 'N/A'}
+                          </td>
 
-                            {/* Service */}
-                            <td className="px-6 py-4 hidden md:table-cell">
-                              <span className="text-sm text-gray-600">
-                                {SERVICE_LABELS[apt.service] || apt.service}
-                              </span>
-
-                            </td>
-
-                            {/* Date & Time */}
-                            <td className="px-6 py-4 hidden lg:table-cell">
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <Calendar className="w-4 h-4 text-gray-400" />
-                                {new Date(apt.date).toLocaleDateString('en-US', {
-                                  weekday: 'short',
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </div>
-                              {apt.time && (
-                                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                                  <Clock className="w-3 h-3" />
-                                  {apt.time}
-                                </div>
-                              )}
-                            </td>
-
-                            {/* Status */}
-                            <td className="px-6 py-4">
-                              <div className="relative inline-block">
-                                <select
-                                  value={apt.status}
-                                  onChange={(e) =>
-                                    handleStatusChange(apt.id, e.target.value)
-                                  }
-                                  disabled={updatingId === apt.id}
-                                  className={`appearance-none pl-7 pr-8 py-1.5 rounded-full text-xs font-semibold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${statusCfg.color} ${updatingId === apt.id ? 'opacity-50' : ''
-                                    }`}
-                                >
-                                  <option value="Pending">Pending</option>
-                                  <option value="Approved">Approved</option>
-                                  <option value="Rejected">Rejected</option>
-                                </select>
-                                {updatingId === apt.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none animate-spin" />
-                                ) : (
-                                  <StatusIcon className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                )}
-                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
-                              </div>
-                            </td>
-
-                            {/* Actions */}
-                            <td className="px-6 py-4 text-right">
-                              {showDeleteConfirm === apt.id ? (
-                                <div className="inline-flex items-center gap-2">
-                                  <button
-                                    onClick={() => handleDelete(apt.id)}
-                                    disabled={deletingId === apt.id}
-                                    className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                                  >
-                                    {deletingId === apt.id ? 'Deleting...' : 'Confirm'}
-                                  </button>
-                                  <button
-                                    onClick={() => setShowDeleteConfirm(null)}
-                                    className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => setShowDeleteConfirm(apt.id)}
-                                  className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
-                                  title="Delete appointment"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {(() => {
-              const parseDateTime = (dateStr, timeStr) => {
-                if (!dateStr || !timeStr) return new Date();
-                const [year, month, day] = dateStr.split("-");
-                let [timePart, ampm] = timeStr.split(" ");
-                if (!timePart) return new Date(year, month - 1, day);
-
-                let [hour, minute] = timePart.split(":");
-                hour = parseInt(hour);
-                if (ampm === "PM" && hour !== 12) hour += 12;
-                if (ampm === "AM" && hour === 12) hour = 0;
-
-                return new Date(year, month - 1, day, hour, minute);
-              };
-
-              const now = new Date();
-              const upcomingList = appointments
-                .filter((a) => {
-                  if (!a.time) return false;
-                  const dt = parseDateTime(a.date, a.time);
-                  return dt > now;
-                })
-                .sort(
-                  (a, b) =>
-                    parseDateTime(a.date, a.time) -
-                    parseDateTime(b.date, b.time)
-                );
-
-              if (upcomingList.length === 0) return null;
-
-              return (
-                <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="p-5 border-b border-gray-100 flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-primary" />
-                    <h3 className="text-lg font-bold text-gray-900">
-                      Upcoming Appointments with Doctor
-                    </h3>
-                  </div>
-
-                  <div className="divide-y divide-gray-50">
-                    {upcomingList.map((apt) => (
-                      <div
-                        key={`upcoming-${apt.id}`}
-                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors"
-                      >
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-gray-900">
-                              Dr. {apt.doctor_name || "N/A"}
+                          {/* Service */}
+                          <td className="px-6 py-4 hidden md:table-cell">
+                            <span className="text-sm text-gray-600">
+                              {SERVICE_LABELS[apt.service] || apt.service}
                             </span>
+                          </td>
 
-                            <span className="text-gray-300">•</span>
+                          {/* Date & Time */}
+                          <td className="px-6 py-4 hidden lg:table-cell">
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                              <Calendar className="w-4 h-4 text-gray-400" />
+                              {new Date(apt.date).toLocaleDateString('en-US', {
+                                weekday: 'short',
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                            </div>
+                            {apt.time && (
+                              <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                                <Clock className="w-3.5 h-3.5" />
+                                {apt.time}
+                              </div>
+                            )}
+                          </td>
 
+                          {/* Status */}
+                          <td className="px-6 py-4">
                             <div className="relative inline-block">
                               <select
                                 value={apt.status}
@@ -781,47 +703,129 @@ export default function AdminDashboard() {
                                   handleStatusChange(apt.id, e.target.value)
                                 }
                                 disabled={updatingId === apt.id}
-                                className="pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border"
+                                className={`appearance-none pl-7 pr-8 py-1.5 rounded-full text-xs font-semibold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
+                                  (STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending).color
+                                } ${updatingId === apt.id ? 'opacity-50' : ''}`}
                               >
                                 <option value="Pending">Pending</option>
                                 <option value="Approved">Approved</option>
                                 <option value="Rejected">Rejected</option>
                               </select>
+                              {updatingId === apt.id ? (
+                                <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none animate-spin" />
+                              ) : (
+                                <StatusIcon status={apt.status} className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              )}
+                              <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
                             </div>
-                          </div>
+                          </td>
 
-                          <div className="flex flex-col text-xs text-gray-500">
-                            <p>
-                              <b>Patient:</b>{" "}
-                              {apt.patient_name || apt.email || "N/A"}
-                            </p>
+                          {/* Actions */}
+                          <td className="px-6 py-4 text-right">
+                            {showDeleteConfirm === apt.id ? (
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  onClick={() => handleDelete(apt.id)}
+                                  disabled={deletingId === apt.id}
+                                  className="text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                  {deletingId === apt.id ? 'Deleting...' : 'Confirm'}
+                                </button>
+                                <button
+                                  onClick={() => setShowDeleteConfirm(null)}
+                                  className="text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShowDeleteConfirm(apt.id)}
+                                className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                                title="Delete appointment"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3" />
-                              {apt.phone || "No phone"}
-                            </span>
+            {upcomingAppointments.length > 0 && (
+              <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-gray-100 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold text-gray-900">
+                    Upcoming Appointments with Doctor
+                  </h3>
+                </div>
+
+                <div className="divide-y divide-gray-50">
+                  {upcomingAppointments.map((apt) => (
+                    <div
+                      key={`upcoming-${apt.id}`}
+                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-gray-900">
+                            Dr. {apt?.doctor_name || 'N/A'}
+                          </span>
+
+                          <span className="text-gray-300">•</span>
+
+                          <div className="relative inline-block">
+                            <select
+                              value={apt.status}
+                              onChange={(e) =>
+                                handleStatusChange(apt.id, e.target.value)
+                              }
+                              disabled={updatingId === apt.id}
+                              className="pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border"
+                            >
+                              <option value="Pending">Pending</option>
+                              <option value="Approved">Approved</option>
+                              <option value="Rejected">Rejected</option>
+                            </select>
                           </div>
                         </div>
 
-                        <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-primary flex items-center justify-end gap-1.5">
-                            <Calendar className="w-4 h-4" />
-                            {new Date(apt.date).toLocaleDateString()}
-                          </div>
+                        <div className="flex flex-col text-xs text-gray-500">
+                          <p>
+                            <b>Patient:</b>{" "}
+                            {apt?.patient_name || apt?.phone || 'Unknown Patient'}
+                          </p>
 
-                          {apt.time && (
-                            <div className="text-xs text-gray-400 mt-1 flex items-center justify-end gap-1.5">
-                              <Clock className="w-3.5 h-3.5" />
-                              {apt.time}
-                            </div>
-                          )}
+                          <span className="flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            {apt.phone || "No phone"}
+                          </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-semibold text-primary flex items-center justify-end gap-1.5">
+                          <Calendar className="w-4 h-4" />
+                          {new Date(apt.date).toLocaleDateString()}
+                        </div>
+
+                        {apt.time && (
+                          <div className="text-xs text-gray-400 mt-1 flex items-center justify-end gap-1.5">
+                            <Clock className="w-3.5 h-3.5" />
+                            {apt.time}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
+              </div>
+            )}
           </>
         ) : activeTab === 'users' ? (
           /* ═══ USERS TAB ═══ */
@@ -1091,17 +1095,13 @@ export default function AdminDashboard() {
                       <TrendingUp className="w-5 h-5 text-primary" /> Monthly Bookings
                     </h3>
                     <div className="flex items-end gap-2 h-48">
-                      {Object.entries(analytics.monthlyBookings || {}).map(([month, count]) => {
-                        const maxVal = Math.max(...Object.values(analytics.monthlyBookings || {}), 1);
-                        const height = Math.max((count / maxVal) * 100, 4);
-                        return (
-                          <div key={month} className="flex-1 flex flex-col items-center gap-1">
-                            <span className="text-xs font-semibold text-gray-700">{count}</span>
-                            <div className="w-full bg-primary/80 rounded-t-lg transition-all hover:bg-primary" style={{ height: `${height}%` }} />
-                            <span className="text-[10px] text-gray-400">{month.slice(5)}</span>
-                          </div>
-                        );
-                      })}
+                      {Object.entries(analytics.monthlyBookings || {}).map(([month, count]) => (
+                        <div key={month} className="flex-1 flex flex-col items-center gap-1">
+                          <span className="text-xs font-semibold text-gray-700">{count}</span>
+                          <div className="w-full bg-primary/80 rounded-t-lg transition-all hover:bg-primary" style={{ height: `${Math.max((count / maxMonthlyCount) * 100, 4)}%` }} />
+                          <span className="text-[10px] text-gray-400">{month.slice(5)}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
@@ -1112,23 +1112,20 @@ export default function AdminDashboard() {
                         <BarChart3 className="w-5 h-5 text-primary" /> Popular Services
                       </h3>
                       <div className="space-y-3">
-                        {(analytics.popularServices || []).map((s, i) => {
-                          const maxC = analytics.popularServices[0]?.count || 1;
-                          return (
-                            <div key={s.service} className="flex items-center gap-3">
-                              <span className="text-xs font-mono text-gray-400 w-4">{i + 1}</span>
-                              <div className="flex-1">
-                                <div className="flex justify-between mb-1">
-                                  <span className="text-sm font-medium text-gray-700 capitalize">{s.service}</span>
-                                  <span className="text-sm font-bold text-gray-900">{s.count}</span>
-                                </div>
-                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(s.count / maxC) * 100}%` }} />
-                                </div>
+                        {(analytics.popularServices || []).map((s, i) => (
+                          <div key={s.service} className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-gray-400 w-4">{i + 1}</span>
+                            <div className="flex-1">
+                              <div className="flex justify-between mb-1">
+                                <span className="text-sm font-medium text-gray-700 capitalize">{s.service}</span>
+                                <span className="text-sm font-bold text-gray-900">{s.count}</span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(s.count / maxPopularServiceCount) * 100}%` }} />
                               </div>
                             </div>
-                          );
-                        })}
+                          </div>
+                        ))}
                         {(analytics.popularServices || []).length === 0 && (
                           <p className="text-sm text-gray-400">No data yet</p>
                         )}
@@ -1140,21 +1137,17 @@ export default function AdminDashboard() {
                         <Activity className="w-5 h-5 text-primary" /> Status Breakdown
                       </h3>
                       <div className="space-y-4">
-                        {Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => {
-                          const colors = { Pending: 'bg-amber-400', Approved: 'bg-emerald-400', Rejected: 'bg-red-400' };
-                          const total = analytics.totalAppointments || 1;
-                          return (
-                            <div key={status}>
-                              <div className="flex justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700">{status}</span>
-                                <span className="text-sm font-bold text-gray-900">{count} ({Math.round((count / total) * 100)}%)</span>
-                              </div>
-                              <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                                <div className={`h-full ${colors[status] || 'bg-gray-400'} rounded-full`} style={{ width: `${(count / total) * 100}%` }} />
-                              </div>
+                        {Object.entries(analytics.statusBreakdown || {}).map(([status, count]) => (
+                          <div key={status}>
+                            <div className="flex justify-between mb-1">
+                              <span className="text-sm font-medium text-gray-700">{status}</span>
+                              <span className="text-sm font-bold text-gray-900">{count} ({Math.round((count / (analytics.totalAppointments || 1)) * 100)}%)</span>
                             </div>
-                          );
-                        })}
+                            <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-full ${status === 'Pending' ? 'bg-amber-400' : status === 'Approved' ? 'bg-emerald-400' : status === 'Rejected' ? 'bg-red-400' : 'bg-gray-400'} rounded-full`} style={{ width: `${(count / (analytics.totalAppointments || 1)) * 100}%` }} />
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
