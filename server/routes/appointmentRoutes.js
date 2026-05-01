@@ -41,47 +41,53 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, async (req, res) => {
   console.log("==== NEW APPOINTMENT REQUEST ====");
   console.log("REQ BODY:", req.body);
-  console.log("HEADERS:", req.headers);
 
-  const { name, email, phone, service, date, time, doctor_id } = req.body;
-  const patient_name = req.body.patient_name || name;
+  const { name, email, phone, service, date, time, doctor_id, notes } = req.body;
   const user_id = req.user?.id;
+
+  // 1. Validation
+  if (!name || !phone) {
+    return res.status(400).json({ error: "Missing patient name or phone" });
+  }
 
   if (!user_id) {
     return res.status(401).json({ success: false, error: "User not authenticated" });
   }
 
-  // Validation
-  if (!name || !email || !phone || !service || !date || !time || !doctor_id) {
-    console.log("❌ Missing fields:", { name, email, phone, service, date, time, doctor_id });
+  if (!email || !service || !date || !time || !doctor_id) {
     return res.status(400).json({ success: false, error: "Missing required fields" });
   }
 
   try {
-    // 1. Fetch doctor details from database
-    const { data: doctorData, error: doctorError } = await supabase
-      .from("users")
-      .select("name")
-      .eq("id", doctor_id)
-      .single();
-
-    if (doctorError) {
-      console.warn("⚠️ Could not fetch doctor name:", doctorError.message);
-    }
-
-    const doctor_name = doctorData?.name || "Assigned Doctor";
-
-    // 2. Insert appointment into database
-    const { data, error } = await supabase.from("appointments").insert([{
+    // 2. Prepare Data for Insertion
+    const appointmentData = {
       user_id,
-      patient_name,
+      patient_name: name, // name -> patient_name
       email,
       phone,
       service,
       date,
       time,
-      doctor_id
-    }]);
+      notes: notes || '',
+      doctor_id,
+      status: 'Pending'
+    };
+
+    console.log("FINAL INSERT DATA:", appointmentData);
+
+    // 3. Fetch doctor details for the email
+    const { data: doctorData } = await supabase
+      .from("users")
+      .select("name")
+      .eq("id", doctor_id)
+      .single();
+
+    const doctor_name = doctorData?.name || "Assigned Doctor";
+
+    // 4. Insert into database
+    const { data, error } = await supabase
+      .from("appointments")
+      .insert([appointmentData]);
 
     if (error) {
       console.log("❌ SUPABASE ERROR:", error);
@@ -90,11 +96,11 @@ router.post('/', authMiddleware, async (req, res) => {
 
     console.log("✅ APPOINTMENT CREATED:", data);
 
-    // 3. Send premium confirmation email (non-blocking) using shared utility
+    // 5. Send premium confirmation email (non-blocking)
     try {
       await sendStatusEmail({
         email: email,
-        patient_name: patient_name,
+        patient_name: name,
         service: service,
         date: date,
         time: time,

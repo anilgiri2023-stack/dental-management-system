@@ -602,6 +602,7 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {filteredAppointments.map((apt) => {
+                        console.log("RENDERING:", apt);
                         const statusCfg = STATUS_CONFIG[apt.status] || STATUS_CONFIG.Pending;
                         const StatusIcon = statusCfg.icon;
                         return (
@@ -757,38 +758,39 @@ export default function AdminDashboard() {
                     <h3 className="text-lg font-bold text-gray-900">Upcoming Appointments with Doctor</h3>
                   </div>
                   <div className="divide-y divide-gray-50">
-                    {upcomingList.map((apt) => (
-                      <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor_name || "N/A"}</span>
-                            <span className="text-gray-300">•</span>
-                            <div className="relative inline-block">
-                              <select
-                                value={apt.status}
-                                onChange={(e) => handleStatusChange(apt.id, e.target.value)}
-                                disabled={updatingId === apt.id}
-                                className={`appearance-none pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
-                                  apt.status === "Approved" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
-                                  apt.status === "Rejected" ? "bg-red-50 text-red-600 border-red-100" : 
-                                  "bg-amber-50 text-amber-600 border-amber-100"
-                                } ${updatingId === apt.id ? 'opacity-50' : ''}`}
-                              >
-                                <option value="Pending">Pending</option>
-                                <option value="Approved">Approved</option>
-                                <option value="Rejected">Rejected</option>
-                              </select>
-                              <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
+                    {upcomingList.map((apt) => {
+                      console.log("RENDERING:", apt);
+                      return (
+                        <div key={`upcoming-${apt.id}`} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50/50 transition-colors">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-gray-900">Dr. {apt.doctor_name || "N/A"}</span>
+                              <span className="text-gray-300">•</span>
+                              <div className="relative inline-block">
+                                <select
+                                  value={apt.status}
+                                  onChange={(e) => handleStatusChange(apt.id, e.target.value)}
+                                  disabled={updatingId === apt.id}
+                                  className={`appearance-none pl-2.5 pr-8 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all ${
+                                    apt.status === "Approved" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
+                                    apt.status === "Rejected" ? "bg-red-50 text-red-600 border-red-100" : 
+                                    "bg-amber-50 text-amber-600 border-amber-100"
+                                  } ${updatingId === apt.id ? 'opacity-50' : ''}`}
+                                >
+                                  <option value="Pending">Pending</option>
+                                  <option value="Approved">Approved</option>
+                                  <option value="Rejected">Rejected</option>
+                                </select>
+                                <ChevronDown className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
+                              </div>
+                            </div>
+                            <div className="flex flex-col text-xs text-gray-500">
+                              <p><b>Patient:</b> {apt.patient_name || "N/A"}</p>
+                              <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
+                                <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "N/A"}</span>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex flex-col text-xs text-gray-500">
-                            <p><b>Patient:</b> {apt.patient_name || "N/A"}</p>
-                            <div className="flex flex-col gap-1 text-xs text-gray-500 mt-2">
-                              <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{apt.email || "N/A"}</span>
-                              <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{apt.phone || "N/A"}</span>
-                            </div>
-                          </div>
-                        </div>
                         <div className="text-right shrink-0">
                           <div className="text-sm font-semibold text-primary flex items-center justify-end gap-1.5">
                             <Calendar className="w-4 h-4" />
