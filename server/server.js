@@ -17,15 +17,32 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ─── Middleware ───────────────────────────────────────────
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:5173",
+  "https://dental-management-system-sand.vercel.app"
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ CORS blocked for origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user']
 }));
+
 app.use(express.json());
 
 // ─── Request Logger (Debug) ──────────────────────────────
 app.use((req, res, next) => {
-  console.log(`📡 [${req.method}] ${req.url}`);
+  const origin = req.headers.origin || 'No Origin';
+  console.log(`📡 [${req.method}] ${req.url} | Origin: ${origin}`);
   next();
 });
 
@@ -230,6 +247,6 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
 });

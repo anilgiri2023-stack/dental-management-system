@@ -37,7 +37,7 @@ export function AuthProvider({ children }) {
 
   // Helper — make authenticated request
   const authFetch = useCallback(async (url, options = {}) => {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log(`🌐 API Request: ${url}`);
     }
     return apiFetch(url, options);
@@ -77,7 +77,7 @@ export function AuthProvider({ children }) {
 
   // Send OTP to email or phone
   const sendOtp = async (identifier, type, name, phone) => {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log(`📧 Sending OTP to ${identifier} (${type})`);
     }
     return apiSendOtp(identifier, name, phone);
@@ -134,7 +134,7 @@ export function AuthProvider({ children }) {
 
   // ─── Admin Auth ───
   const adminLogin = async (email, password) => {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('🔐 Admin login attempt...');
     }
     const data = await apiFetch('/admin/login', {
