@@ -20,36 +20,70 @@ export default function SetPassword() {
   useEffect(() => {
     const handleInvitation = async () => {
       try {
-        // 1. Extract tokens from URL hash (standard Supabase invite flow)
         const hash = window.location.hash;
-        if (!hash) {
+        const search = window.location.search;
+        
+        let accessToken = null;
+        let refreshToken = null;
+
+        if (hash) {
+          const params = new URLSearchParams(hash.substring(1));
+          accessToken = params.get('access_token');
+          refreshToken = params.get('refresh_token');
+        }
+        
+        if (!accessToken && search) {
+          const queryParams = new URLSearchParams(search);
+          accessToken = queryParams.get('access_token');
+          refreshToken = queryParams.get('refresh_token');
+        }
+
+        console.log('🔍 Auth tokens check:', { 
+          hasAccessToken: !!accessToken, 
+          hasRefreshToken: !!refreshToken,
+          source: hash && accessToken ? 'hash' : (search && accessToken ? 'query' : 'none')
+        });
+
+        if (!accessToken) {
           setError('Invalid or missing invitation link. Please check your email.');
           setInitializing(false);
           return;
         }
 
-        // Parse hash params
-        const params = new URLSearchParams(hash.substring(1));
-        const accessToken = params.get('access_token');
-        const refreshToken = params.get('refresh_token');
-
-        if (!accessToken || !refreshToken) {
-          setError('Invalid session tokens. Please try the link from your email again.');
-          setInitializing(false);
-          return;
-        }
-
         // 2. Establish session with Supabase
-        const { data, error: sessionError } = await supabase.auth.setSession({
+        console.log('🔄 Calling supabase.auth.setSession...');
+        const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
-          refresh_token: refreshToken
+          refresh_token: refreshToken || accessToken
         });
 
-        if (sessionError) throw sessionError;
-
-        if (data.user) {
-          setEmail(data.user.email);
+        if (sessionError) {
+          console.error('❌ setSession error:', sessionError);
+          throw sessionError;
         }
+        console.log('✅ setSession success:', !!sessionData.session);
+
+        // Verify session setup
+        console.log('🔄 Calling supabase.auth.getSession...');
+        const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
+        
+        if (getSessionError) {
+          console.error('❌ getSession error:', getSessionError);
+          throw getSessionError;
+        }
+        console.log('✅ getSession result:', !!session);
+
+        if (!session) {
+           throw new Error('Auth session missing! Failed to initialize session from tokens.');
+        }
+
+        if (session.user) {
+          setEmail(session.user.email);
+        }
+
+        // Clean tokens from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+
         setInitializing(false);
       } catch (err) {
         console.error('Session initialization error:', err);
@@ -77,8 +111,14 @@ export default function SetPassword() {
     setLoading(true);
     try {
       // 1. Update password in Supabase Auth
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
+      console.log('🔄 Calling supabase.auth.updateUser...');
+      const { data: updateData, error: updateError } = await supabase.auth.updateUser({ password });
+      
+      if (updateError) {
+        console.error('❌ updateUser error:', updateError);
+        throw updateError;
+      }
+      console.log('✅ updateUser success');
 
       // 2. Sync activation with backend public.users table
       const response = await apiFetch('/auth/activate-account', {
